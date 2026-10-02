@@ -31,8 +31,8 @@ Prices are hand-calculated in Excel and hand-copied into LaTeX. The AI must neve
 - Runner: `.venv/bin/pytest`.
 
 ## Tasks
-- [ ] T0 — Scaffold: pyproject (Python >=3.12, hatchling, pytest, ruff), README, CI (GitHub Actions: ruff + pytest). Route: inline (mechanical).
-- [ ] T1 — Money + Currency (Decimal, add/multiply, currency mismatch error, 2-decimal quantization). Route: delegated writer.
+- [x] T0 — Scaffold: pyproject (Python >=3.12, hatchling, pytest, ruff), README, CI (GitHub Actions: ruff + pytest). Route: inline (mechanical). Evidence: commit 4939f9e on main; `ruff check` passed, `pytest` 1 passed (smoke).
+- [x] T1 — Money + Currency (Decimal, add/multiply, currency mismatch error, 2-decimal quantization). Route: delegated writer. Evidence: commit f48afb8; RED: `pytest tests/domain/test_money.py` failed at collection (no `quotes.domain.errors`); GREEN: 15 new tests, 16 total passed; ruff check/format clean.
 - [ ] T2 — CatalogItem + PricingUnit (PER_GROUP, PER_DAY, PER_PERSON, PER_UNIT) + QuoteLine cost. Route: delegated writer.
 - [ ] T3 — PricingPolicy + PriceBreakdown: subtotal, margin, sale PEN, USD conversion, round-up step, final PEN, per-person. Route: delegated writer.
 - [ ] T4 — Optional extras priced separately with same policy. Route: delegated writer.
@@ -51,4 +51,4 @@ Prices are hand-calculated in Excel and hand-copied into LaTeX. The AI must neve
 - Branch: `feat/pricing-01-domain` (main holds scaffold).
 
 ## Next step
-T0 scaffold.
+T1–T4 on `feat/pricing-01-domain` (delegated writer, strict TDD).
