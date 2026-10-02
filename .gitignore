@@ -1,0 +1,30 @@
+# Business data (real prices/margins) - never commit to the public repo
+*.xlsx
+*.xls
+data/private/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Env
+.env
+
+# Outputs
+out/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+
+# Local agent tooling
+.atl/
