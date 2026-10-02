@@ -33,8 +33,8 @@ Prices are hand-calculated in Excel and hand-copied into LaTeX. The AI must neve
 ## Tasks
 - [x] T0 — Scaffold: pyproject (Python >=3.12, hatchling, pytest, ruff), README, CI (GitHub Actions: ruff + pytest). Route: inline (mechanical). Evidence: commit 4939f9e on main; `ruff check` passed, `pytest` 1 passed (smoke).
 - [x] T1 — Money + Currency (Decimal, add/multiply, currency mismatch error, 2-decimal quantization). Route: delegated writer. Evidence: commit 2f5c9e8; RED: `pytest tests/domain/test_money.py` failed at collection (no `quotes.domain.errors`); GREEN: 15 new tests, 16 total passed; ruff check/format clean.
-- [x] T2 — CatalogItem + PricingUnit (PER_GROUP, PER_DAY, PER_PERSON, PER_UNIT) + QuoteLine cost. Route: delegated writer. Evidence: commit COMMIT_T2; RED: `pytest tests/domain/test_catalog.py` failed at collection (no `quotes.domain.catalog`); GREEN: 16 new tests, 32 total passed; ruff clean.
-- [ ] T3 — PricingPolicy + PriceBreakdown: subtotal, margin, sale PEN, USD conversion, round-up step, final PEN, per-person. Route: delegated writer.
+- [x] T2 — CatalogItem + PricingUnit (PER_GROUP, PER_DAY, PER_PERSON, PER_UNIT) + QuoteLine cost. Route: delegated writer. Evidence: commit 3f54fa3; RED: `pytest tests/domain/test_catalog.py` failed at collection (no `quotes.domain.catalog`); GREEN: 16 new tests, 32 total passed; ruff clean.
+- [x] T3 — PricingPolicy + PriceBreakdown: subtotal, margin, sale PEN, USD conversion, round-up step, final PEN, per-person. Route: delegated writer. Evidence: commit COMMIT_T3; RED: `pytest tests/domain/test_pricing.py` failed at collection (no `quotes.domain.pricing`); GREEN: 18 new tests, 50 total passed; ruff clean.
 - [ ] T4 — Optional extras priced separately with same policy. Route: delegated writer.
 
 ## Acceptance criteria
