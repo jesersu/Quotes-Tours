@@ -41,8 +41,8 @@ class PriceBreakdown:
     sale_usd_exact: Money
     final_usd: Money
     final_pen: Money
-    per_person_usd: Money
-    per_person_pen: Money
+    per_adult_usd: Money
+    per_adult_pen: Money
     paid_locally: tuple[LocalPaymentInfo, ...] = ()  # information only, outside every total
 
 
@@ -52,7 +52,7 @@ def price_quote(
     policy: PricingPolicy,
     paid_locally: Sequence[LocalPaymentInfo] = (),
 ) -> PriceBreakdown:
-    """Price lines: margin, final PEN, USD reference (optionally rounded up), per-person totals."""
+    """Price lines: margin, final PEN, USD reference (optionally rounded), per-adult prices."""
     if not lines:
         raise InvalidPricingInput("A quote needs at least one line")
 
@@ -76,8 +76,8 @@ def price_quote(
         sale_usd_exact=sale_usd_exact,
         final_usd=final_usd,
         final_pen=final_pen,
-        per_person_usd=Money(final_usd.amount / travelers.total, Currency.USD).quantized(),
-        per_person_pen=Money(final_pen.amount / travelers.total, Currency.PEN).quantized(),
+        per_adult_usd=Money(final_usd.amount / travelers.full_fare_count, Currency.USD).quantized(),
+        per_adult_pen=Money(final_pen.amount / travelers.full_fare_count, Currency.PEN).quantized(),
         paid_locally=tuple(paid_locally),
     )
 

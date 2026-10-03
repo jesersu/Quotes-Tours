@@ -45,8 +45,8 @@ def test_synthetic_two_day_quote_two_travelers():
     assert result.sale_usd_exact.amount.quantize(D("0.01")) == D("514.71")
     assert result.final_usd == Money(D(550), Currency.USD)  # rounded UP to step 50
     assert result.final_pen == pen("1870.00")  # 550 x 3.4
-    assert result.per_person_usd == Money(D("275.00"), Currency.USD)  # 550 / 2
-    assert result.per_person_pen == pen("935.00")  # 1870 / 2
+    assert result.per_adult_usd == Money(D("275.00"), Currency.USD)  # 550 / 2
+    assert result.per_adult_pen == pen("935.00")  # 1870 / 2
     assert result.lines == tuple(lines)
 
 
@@ -80,11 +80,11 @@ def test_zero_margin():
     assert result.sale_pen == pen(100)
 
 
-def test_per_person_rounds_half_up_to_cents():
+def test_per_adult_rounds_half_up_to_cents():
     result = price_quote([line(100)], Travelers(3), policy(fx="1", step="50"))
     assert result.final_usd.amount == D(100)
-    assert result.per_person_usd == Money(D("33.33"), Currency.USD)
-    assert result.per_person_pen == pen("33.33")
+    assert result.per_adult_usd == Money(D("33.33"), Currency.USD)
+    assert result.per_adult_pen == pen("33.33")
 
 
 def test_empty_lines_rejected():
@@ -157,3 +157,15 @@ def test_optional_rounding_still_rounds_usd_up_and_derives_pen_when_step_is_set(
     )
     assert result.final_usd == Money(D(100), Currency.USD)  # 95.14 rounded up to step 20
     assert result.final_pen == pen("350.00")  # 100 x 3.5
+
+
+def test_per_adult_price_divides_by_full_fare_travelers_not_all_travelers():
+    # 2 adults + a 9 year old + a 4 year old: divide the final price by 2, not 4.
+    result = price_quote([line(300)], Travelers(2, (9, 4)), PricingPolicy(margin_rate=D(0)))
+    assert result.per_adult_pen == pen("150.00")
+    assert result.per_adult_usd == Money(D("42.86"), Currency.USD)  # 300 / 3.5 = 85.71 / 2
+
+
+def test_sixteen_and_seventeen_year_olds_count_in_per_adult_price():
+    result = price_quote([line(300)], Travelers(1, (16, 17)), PricingPolicy(margin_rate=D(0)))
+    assert result.per_adult_pen == pen("100.00")

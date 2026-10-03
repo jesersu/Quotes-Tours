@@ -49,7 +49,7 @@ Prices are hand-calculated in Excel and hand-copied into LaTeX. The AI must neve
 - [x] T5 — Travelers (adults + child ages) + child pricing rules (under 6 free; child unit price on per-person items). Route: delegated writer. Evidence: RED: collection failed (no `quotes.domain.travelers`, no `build_line`); GREEN: all domain tests pass, ruff clean. Replaces `quantity_for` with `build_line(item, days, travelers)` returning a `QuoteLine(quantity, child_quantity)`; `price_quote`/`price_optional_extras` take `Travelers`. Base 0321c90.
 - [x] T6 — Policy update: FX default 3.5, optional rounding (disabled by default), USD as reference; extras without rounding. Route: delegated writer. Evidence: RED: 7 new tests failed (`fx_rate` required, no rounding default, final PEN derived from rounded USD); GREEN: 78 passed, ruff clean. Previous commit 33ce506. `usd_rounding_step: Decimal | None = None`; extras always priced with rounding off.
 - [x] T7 — Info-only items paid locally (Colca ticket by visitor category, adult/child), excluded from totals. Route: delegated writer. Evidence: RED: collection failed (no `quotes.domain.local_payment`); GREEN: 85 passed, ruff clean. Previous commit db4030e. Modeled as `LocalPaymentInfo(label, prices=(LocalPrice(VisitorCategory, Money PEN), ...))`, passed to `price_quote(..., paid_locally=)` and returned in `PriceBreakdown.paid_locally`.
-- [ ] T8 — Per-person reference price by adults. Route: delegated writer.
+- [x] T8 — Per-person reference price by adults. Route: delegated writer. Evidence: RED: 4 tests failed (no `per_adult_*`); GREEN: 91 passed, ruff clean. Previous commit 0a869de. `per_person_*` renamed `per_adult_pen`/`per_adult_usd`, dividing by `Travelers.full_fare_count`. Also added non-finite Money test (R3-001; passed immediately, regression guard).
 
 ## Acceptance criteria
 - A synthetic 2D1N quote (transport flat + guide per day + lunch/ticket per person) yields correct subtotal, margin, sale PEN, USD rounded up to step, final PEN, per-person USD.
@@ -68,4 +68,4 @@ Prices are hand-calculated in Excel and hand-copied into LaTeX. The AI must neve
 - T1–T4 (range main..0321c90): assess risk=medium, review_due=slice_budget_reached; consent granted by owner; reliability lens APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-0cbbbd015315e2db). Advisory (non-blocking) R3-001: no test for non-finite Decimal strings ('NaN', 'Infinity') in money.to_decimal. Reviewed boundary advances to 0321c90.
 
 ## Next step
-Phase 1b T5–T8 (delegated writer, strict TDD); next review base = 0321c90.
+Phase 1b T5–T8 done; next review base = 0321c90 (range 0321c90..HEAD pending native review assessment).

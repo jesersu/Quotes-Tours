@@ -80,3 +80,9 @@ def test_quantized_rounds_half_up_to_two_decimals():
 def test_is_negative():
     assert Money(Decimal("-0.01"), Currency.PEN).is_negative
     assert not pen(0).is_negative
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "sNaN"])
+def test_rejects_non_finite_decimal_strings(value):
+    with pytest.raises(InvalidPricingInput):
+        Money(value, Currency.PEN)

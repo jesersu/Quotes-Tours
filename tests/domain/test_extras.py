@@ -31,7 +31,7 @@ def test_each_extra_is_priced_with_the_same_policy():
     assert result[1].breakdown.subtotal_pen == Money(D(240), Currency.PEN)
     assert result[1].breakdown.sale_pen == Money(D(300), Currency.PEN)
     assert result[1].breakdown.final_usd == Money(D("85.71"), Currency.USD)
-    assert result[1].breakdown.per_person_usd == Money(D("42.86"), Currency.USD)
+    assert result[1].breakdown.per_adult_usd == Money(D("42.86"), Currency.USD)
 
 
 def test_no_extras_returns_empty_tuple():
