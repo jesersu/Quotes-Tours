@@ -8,6 +8,7 @@ from decimal import ROUND_CEILING, Decimal
 
 from quotes.domain.catalog import QuoteLine
 from quotes.domain.errors import InvalidPricingInput
+from quotes.domain.local_payment import LocalPaymentInfo
 from quotes.domain.money import Currency, Money, to_decimal
 from quotes.domain.travelers import Travelers
 
@@ -42,10 +43,14 @@ class PriceBreakdown:
     final_pen: Money
     per_person_usd: Money
     per_person_pen: Money
+    paid_locally: tuple[LocalPaymentInfo, ...] = ()  # information only, outside every total
 
 
 def price_quote(
-    lines: Sequence[QuoteLine], travelers: Travelers, policy: PricingPolicy
+    lines: Sequence[QuoteLine],
+    travelers: Travelers,
+    policy: PricingPolicy,
+    paid_locally: Sequence[LocalPaymentInfo] = (),
 ) -> PriceBreakdown:
     """Price lines: margin, final PEN, USD reference (optionally rounded up), per-person totals."""
     if not lines:
@@ -73,6 +78,7 @@ def price_quote(
         final_pen=final_pen,
         per_person_usd=Money(final_usd.amount / travelers.total, Currency.USD).quantized(),
         per_person_pen=Money(final_pen.amount / travelers.total, Currency.PEN).quantized(),
+        paid_locally=tuple(paid_locally),
     )
 
 

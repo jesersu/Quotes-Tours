@@ -48,7 +48,7 @@ Prices are hand-calculated in Excel and hand-copied into LaTeX. The AI must neve
 
 - [x] T5 — Travelers (adults + child ages) + child pricing rules (under 6 free; child unit price on per-person items). Route: delegated writer. Evidence: RED: collection failed (no `quotes.domain.travelers`, no `build_line`); GREEN: all domain tests pass, ruff clean. Replaces `quantity_for` with `build_line(item, days, travelers)` returning a `QuoteLine(quantity, child_quantity)`; `price_quote`/`price_optional_extras` take `Travelers`. Base 0321c90.
 - [x] T6 — Policy update: FX default 3.5, optional rounding (disabled by default), USD as reference; extras without rounding. Route: delegated writer. Evidence: RED: 7 new tests failed (`fx_rate` required, no rounding default, final PEN derived from rounded USD); GREEN: 78 passed, ruff clean. Previous commit 33ce506. `usd_rounding_step: Decimal | None = None`; extras always priced with rounding off.
-- [ ] T7 — Info-only items paid locally (Colca ticket by visitor category, adult/child), excluded from totals. Route: delegated writer.
+- [x] T7 — Info-only items paid locally (Colca ticket by visitor category, adult/child), excluded from totals. Route: delegated writer. Evidence: RED: collection failed (no `quotes.domain.local_payment`); GREEN: 85 passed, ruff clean. Previous commit db4030e. Modeled as `LocalPaymentInfo(label, prices=(LocalPrice(VisitorCategory, Money PEN), ...))`, passed to `price_quote(..., paid_locally=)` and returned in `PriceBreakdown.paid_locally`.
 - [ ] T8 — Per-person reference price by adults. Route: delegated writer.
 
 ## Acceptance criteria
