@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from quotes.domain.catalog import QuoteLine
 from quotes.domain.errors import InvalidPricingInput
@@ -22,13 +22,14 @@ def price_optional_extras(
     travelers: Travelers,
     policy: PricingPolicy,
 ) -> tuple[OptionalExtraPrice, ...]:
-    """Price each labelled extra with the same policy as the main quote."""
+    """Price each labelled extra with the same margin and FX as the main quote, never rounded."""
+    unrounded = replace(policy, usd_rounding_step=None)
     labels = [label.strip() for label, _ in extras]
     if any(not label for label in labels):
         raise InvalidPricingInput("Extra labels must not be empty")
     if len(set(labels)) != len(labels):
         raise InvalidPricingInput("Extra labels must be unique")
     return tuple(
-        OptionalExtraPrice(label, price_quote(lines, travelers, policy))
+        OptionalExtraPrice(label, price_quote(lines, travelers, unrounded))
         for label, (_, lines) in zip(labels, extras, strict=True)
     )

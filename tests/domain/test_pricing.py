@@ -20,8 +20,10 @@ def line(price: str | int, quantity: int = 1, unit=PricingUnit.PER_GROUP) -> Quo
     return QuoteLine(item, quantity)
 
 
-def policy(margin="0", fx="1", step="50") -> PricingPolicy:
-    return PricingPolicy(margin_rate=D(margin), fx_rate=D(fx), usd_rounding_step=D(step))
+def policy(margin="0", fx="1", step: str | None = "50") -> PricingPolicy:
+    return PricingPolicy(
+        margin_rate=D(margin), fx_rate=D(fx), usd_rounding_step=D(step) if step else None
+    )
 
 
 def test_synthetic_two_day_quote_two_travelers():
@@ -118,5 +120,40 @@ def test_policy_rejects_float_inputs():
         PricingPolicy(margin_rate=0.2, fx_rate=D("3.5"))  # type: ignore[arg-type]
 
 
-def test_default_step_is_fifty():
-    assert PricingPolicy(margin_rate=D("0.3"), fx_rate=D("3.5")).usd_rounding_step == D(50)
+def test_fx_defaults_to_three_and_a_half():
+    assert PricingPolicy(margin_rate=D("0.15")).fx_rate == D("3.5")
+
+
+def test_rounding_is_disabled_by_default():
+    assert PricingPolicy(margin_rate=D("0.15")).usd_rounding_step is None
+
+
+def test_without_rounding_final_price_is_sale_pen_and_usd_is_converted_reference():
+    # 333 x 1.15 = 382.95 PEN; / 3.5 = 109.4142... USD reference.
+    policy_ = PricingPolicy(margin_rate=D("0.15"))
+    result = price_quote([line(333)], Travelers(1), policy_)
+
+    assert result.sale_pen == pen("382.95")
+    assert result.final_pen == pen("382.95")
+    assert result.final_usd == Money(D("109.41"), Currency.USD)
+
+
+def test_without_rounding_final_pen_is_quantized_sale_pen():
+    # 100.005 PEN is not a cent amount; final PEN is its 2-decimal quantization.
+    result = price_quote([line("100.005")], Travelers(1), PricingPolicy(margin_rate=D(0)))
+    assert result.final_pen == pen("100.01")
+
+
+def test_without_rounding_final_pen_is_not_derived_from_rounded_usd():
+    result = price_quote([line(333)], Travelers(1), PricingPolicy(margin_rate=D(0)))
+    # 333 / 3.5 = 95.14 USD; 95.14 x 3.5 = 332.99 would differ from the sale PEN.
+    assert result.final_usd == Money(D("95.14"), Currency.USD)
+    assert result.final_pen == pen("333.00")
+
+
+def test_optional_rounding_still_rounds_usd_up_and_derives_pen_when_step_is_set():
+    result = price_quote(
+        [line(333)], Travelers(1), PricingPolicy(margin_rate=D(0), usd_rounding_step=D("20"))
+    )
+    assert result.final_usd == Money(D(100), Currency.USD)  # 95.14 rounded up to step 20
+    assert result.final_pen == pen("350.00")  # 100 x 3.5
