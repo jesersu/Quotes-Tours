@@ -9,6 +9,7 @@ from decimal import ROUND_CEILING, Decimal
 from quotes.domain.catalog import QuoteLine
 from quotes.domain.errors import InvalidPricingInput
 from quotes.domain.money import Currency, Money, to_decimal
+from quotes.domain.travelers import Travelers
 
 
 @dataclass(frozen=True)
@@ -43,13 +44,11 @@ class PriceBreakdown:
 
 
 def price_quote(
-    lines: Sequence[QuoteLine], travelers: int, policy: PricingPolicy
+    lines: Sequence[QuoteLine], travelers: Travelers, policy: PricingPolicy
 ) -> PriceBreakdown:
     """Price a set of lines: margin, USD conversion rounded up to a step, per-person totals."""
     if not lines:
         raise InvalidPricingInput("A quote needs at least one line")
-    if isinstance(travelers, bool) or not isinstance(travelers, int) or travelers < 1:
-        raise InvalidPricingInput("Travelers must be an integer of at least 1")
 
     subtotal = Money.total((line.cost for line in lines), Currency.PEN)
     margin = subtotal * policy.margin_rate
@@ -66,8 +65,8 @@ def price_quote(
         sale_usd_exact=sale_usd_exact,
         final_usd=final_usd,
         final_pen=final_pen,
-        per_person_usd=Money(final_usd.amount / travelers, Currency.USD).quantized(),
-        per_person_pen=Money(final_pen.amount / travelers, Currency.PEN).quantized(),
+        per_person_usd=Money(final_usd.amount / travelers.total, Currency.USD).quantized(),
+        per_person_pen=Money(final_pen.amount / travelers.total, Currency.PEN).quantized(),
     )
 
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from quotes.domain.catalog import QuoteLine
 from quotes.domain.errors import InvalidPricingInput
 from quotes.domain.pricing import PriceBreakdown, PricingPolicy, price_quote
+from quotes.domain.travelers import Travelers
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,7 @@ class OptionalExtraPrice:
 
 def price_optional_extras(
     extras: Sequence[tuple[str, Sequence[QuoteLine]]],
-    travelers: int,
+    travelers: Travelers,
     policy: PricingPolicy,
 ) -> tuple[OptionalExtraPrice, ...]:
     """Price each labelled extra with the same policy as the main quote."""
