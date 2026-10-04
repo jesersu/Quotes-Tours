@@ -56,16 +56,20 @@ Prices are hand-calculated in Excel and hand-copied into LaTeX. The AI must neve
 - Invalid input rejected: negative prices, zero/negative pax or days, margin < 0, FX <= 0, mixed currencies.
 - `ruff check` and `pytest` pass.
 
-## Open questions (do not block)
+## Decisions and open questions
 - USD rounding step: off by default (owner decision); optional `usd_rounding_step` kept for later.
 - FX: default 3.5, overridable per quote.
-- Children aged 16-17 are priced as adults (assumption, coded in `travelers.py`); confirm with the owner.
+- Children aged 16-17 are priced as adults — CONFIRMED by owner (2026-10-03).
+- USD reference shown with 2 decimals — CONFIRMED by owner (2026-10-03).
 
 ## Progress
 - Branch: `feat/pricing-01-domain` (main holds scaffold).
 
 ## Review log
 - T1–T4 (range main..0321c90): assess risk=medium, review_due=slice_budget_reached; consent granted by owner; reliability lens APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-0cbbbd015315e2db). Advisory (non-blocking) R3-001: no test for non-finite Decimal strings ('NaN', 'Infinity') in money.to_decimal. Reviewed boundary advances to 0321c90.
+- T5–T8 (range 0321c90..31d2f82): assess risk=medium, review_due=slice_budget_reached; consent granted by owner; reliability lens APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-09210253a8efce4a). Advisory WARNING R3-stray-backup-test: stray `tests/domain/test_extras.py-E` committed in 33ce506 — removed in follow-up chore commit; `*-E` added to .gitignore. Reviewed boundary advances to 31d2f82.
+
+- d447f32 (chore, removes stray file): assess risk=medium, review_due=false (under_budget) — pending in next slice from 31d2f82.
 
 ## Next step
-Phase 1b T5–T8 done; next review base = 0321c90 (range 0321c90..HEAD pending native review assessment).
+Phase 1 + 1b complete on `feat/pricing-01-domain` (91 tests). Owner decides push + PR to `main`; then Phase 2 (Excel catalog adapter).
