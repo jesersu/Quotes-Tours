@@ -31,24 +31,45 @@ Prices are hand-calculated in Excel and hand-copied into LaTeX. The AI must neve
 - Runner: `.venv/bin/pytest`.
 
 ## Tasks
-- [ ] T0 — Scaffold: pyproject (Python >=3.12, hatchling, pytest, ruff), README, CI (GitHub Actions: ruff + pytest). Route: inline (mechanical).
-- [ ] T1 — Money + Currency (Decimal, add/multiply, currency mismatch error, 2-decimal quantization). Route: delegated writer.
-- [ ] T2 — CatalogItem + PricingUnit (PER_GROUP, PER_DAY, PER_PERSON, PER_UNIT) + QuoteLine cost. Route: delegated writer.
-- [ ] T3 — PricingPolicy + PriceBreakdown: subtotal, margin, sale PEN, USD conversion, round-up step, final PEN, per-person. Route: delegated writer.
-- [ ] T4 — Optional extras priced separately with same policy. Route: delegated writer.
+- [x] T0 — Scaffold: pyproject (Python >=3.12, hatchling, pytest, ruff), README, CI (GitHub Actions: ruff + pytest). Route: inline (mechanical). Evidence: commit 4939f9e on main; `ruff check` passed, `pytest` 1 passed (smoke).
+- [x] T1 — Money + Currency (Decimal, add/multiply, currency mismatch error, 2-decimal quantization). Route: delegated writer. Evidence: commit 2f5c9e8; RED: `pytest tests/domain/test_money.py` failed at collection (no `quotes.domain.errors`); GREEN: 15 new tests, 16 total passed; ruff check/format clean.
+- [x] T2 — CatalogItem + PricingUnit (PER_GROUP, PER_DAY, PER_PERSON, PER_UNIT) + QuoteLine cost. Route: delegated writer. Evidence: commit 3f54fa3; RED: `pytest tests/domain/test_catalog.py` failed at collection (no `quotes.domain.catalog`); GREEN: 16 new tests, 32 total passed; ruff clean.
+- [x] T3 — PricingPolicy + PriceBreakdown: subtotal, margin, sale PEN, USD conversion, round-up step, final PEN, per-person. Route: delegated writer. Evidence: commit f38bb15; RED: `pytest tests/domain/test_pricing.py` failed at collection (no `quotes.domain.pricing`); GREEN: 18 new tests, 50 total passed; ruff clean.
+- [x] T4 — Optional extras priced separately with same policy. Route: delegated writer. Evidence: commit see `git log` (`feat(domain): price optional extras separately`); RED: `pytest tests/domain/test_extras.py` failed at collection (no `quotes.domain.extras`); GREEN: 6 new tests, 56 total passed; ruff clean.
+
+## Phase 1b — business rules confirmed by owner (2026-10-03)
+- Margin applies to the full subtotal (confirmed).
+- No commercial USD rounding for now: final price is in PEN (sale PEN); USD is shown as a converted reference (sale PEN / FX, 2 decimals).
+- FX default 3.5 (overridable per quote).
+- Optional extras: same margin, no rounding, never added to the main total.
+- Travelers = adults + children with ages. Children under 6: free on everything. Children 6-15: free on PER_GROUP/PER_DAY items (transport, guide); per-person items use an optional child unit price (e.g. buffet lunch has a child price), otherwise same as adult (e.g. hot springs).
+- Colca tourist ticket is NOT priced by us: paid directly by the tourist at the valley entrance. Shown as information only (Latin American / Foreign adult, child 6-15), like the "paid locally" section in LaTeX quotes. Not in subtotal/margin/total.
+- Per-person reference price divides by paying travelers (adults), not by all travelers.
+
+- [x] T5 — Travelers (adults + child ages) + child pricing rules (under 6 free; child unit price on per-person items). Route: delegated writer. Evidence: RED: collection failed (no `quotes.domain.travelers`, no `build_line`); GREEN: all domain tests pass, ruff clean. Replaces `quantity_for` with `build_line(item, days, travelers)` returning a `QuoteLine(quantity, child_quantity)`; `price_quote`/`price_optional_extras` take `Travelers`. Base 0321c90.
+- [x] T6 — Policy update: FX default 3.5, optional rounding (disabled by default), USD as reference; extras without rounding. Route: delegated writer. Evidence: RED: 7 new tests failed (`fx_rate` required, no rounding default, final PEN derived from rounded USD); GREEN: 78 passed, ruff clean. Previous commit 33ce506. `usd_rounding_step: Decimal | None = None`; extras always priced with rounding off.
+- [x] T7 — Info-only items paid locally (Colca ticket by visitor category, adult/child), excluded from totals. Route: delegated writer. Evidence: RED: collection failed (no `quotes.domain.local_payment`); GREEN: 85 passed, ruff clean. Previous commit db4030e. Modeled as `LocalPaymentInfo(label, prices=(LocalPrice(VisitorCategory, Money PEN), ...))`, passed to `price_quote(..., paid_locally=)` and returned in `PriceBreakdown.paid_locally`.
+- [x] T8 — Per-person reference price by adults. Route: delegated writer. Evidence: RED: 4 tests failed (no `per_adult_*`); GREEN: 91 passed, ruff clean. Previous commit 0a869de. `per_person_*` renamed `per_adult_pen`/`per_adult_usd`, dividing by `Travelers.full_fare_count`. Also added non-finite Money test (R3-001; passed immediately, regression guard).
 
 ## Acceptance criteria
 - A synthetic 2D1N quote (transport flat + guide per day + lunch/ticket per person) yields correct subtotal, margin, sale PEN, USD rounded up to step, final PEN, per-person USD.
 - Invalid input rejected: negative prices, zero/negative pax or days, margin < 0, FX <= 0, mixed currencies.
 - `ruff check` and `pytest` pass.
 
-## Open questions (do not block)
-- USD rounding step: default 50, configurable.
-- FX: configurable per quote.
-- Children pricing: not in the Excel. Not modeled yet.
+## Decisions and open questions
+- USD rounding step: off by default (owner decision); optional `usd_rounding_step` kept for later.
+- FX: default 3.5, overridable per quote.
+- Children aged 16-17 are priced as adults — CONFIRMED by owner (2026-10-03).
+- USD reference shown with 2 decimals — CONFIRMED by owner (2026-10-03).
 
 ## Progress
 - Branch: `feat/pricing-01-domain` (main holds scaffold).
 
+## Review log
+- T1–T4 (range main..0321c90): assess risk=medium, review_due=slice_budget_reached; consent granted by owner; reliability lens APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-0cbbbd015315e2db). Advisory (non-blocking) R3-001: no test for non-finite Decimal strings ('NaN', 'Infinity') in money.to_decimal. Reviewed boundary advances to 0321c90.
+- T5–T8 (range 0321c90..31d2f82): assess risk=medium, review_due=slice_budget_reached; consent granted by owner; reliability lens APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-09210253a8efce4a). Advisory WARNING R3-stray-backup-test: stray `tests/domain/test_extras.py-E` committed in 33ce506 — removed in follow-up chore commit; `*-E` added to .gitignore. Reviewed boundary advances to 31d2f82.
+
+- d447f32 (chore, removes stray file): assess risk=medium, review_due=false (under_budget) — pending in next slice from 31d2f82.
+
 ## Next step
-T0 scaffold.
+Phase 1 + 1b complete on `feat/pricing-01-domain` (91 tests). Owner decides push + PR to `main`; then Phase 2 (Excel catalog adapter).

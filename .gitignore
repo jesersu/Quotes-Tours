@@ -28,3 +28,8 @@ out/
 
 # Local agent tooling
 .atl/
+
+# Editor / sed backup files
+*-E
+*.bak
+*~
