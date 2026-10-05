@@ -29,7 +29,7 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
 
 ## Tasks
 - [x] A1 — Migration + verify + `db/schema.sql` mirror in colcaStarTours. Route: delegated writer (3 files). Evidence: colcaStarTours commit 8276204 (feat/quotes-pricing-schema, unpushed). PGlite: RED all verify checks false; GREEN old schema + migration ×2, fresh schema, and migration over fresh schema → 12/12 checks true, 6 policies; constraint behavior checks pass. RLS enforcement not testable in PGlite (superuser). Review assess: medium, under_budget (320 lines) — pending.
-- [ ] A2 — Owner review of SQL; apply to Supabase; run `.verify.sql`. Route: inline, owner-authorized remote op.
+- [x] A2 — Owner review of SQL; apply to Supabase; run `.verify.sql`. Route: inline, owner-authorized remote op. Evidence (2026-10-05, project `cstar`, sa-east-1): verify BEFORE all false; prerequisites present (set_updated_at, has_role, app_role, anon, authenticated); migration applied via Management API in one transaction (HTTP 201); verify AFTER 12/12 true, 6 policies; API exposed schemas = `public,graphql_public` (quotes not exposed). Owner approved each command in default permission mode. Pending owner action: set `quotes_generator` password.
 - [ ] A3 — Follow-up: re-vendor `colcastar-admin/test/sql/schema.sql` (drift test). Route: inline mechanical.
 - [ ] B1 — `CatalogRepository` port + in-memory catalog. Route: delegated writer.
 - [ ] B2 — Postgres adapter + integration tests (CI service, `TEST_DATABASE_URL`, vendored quotes DDL + drift check). Route: delegated writer.
@@ -45,4 +45,4 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
 - Branches created: colcaStarTours `feat/quotes-pricing-schema` (worktree), Quotes-Tours `feat/catalog-01-db`.
 
 ## Next step
-A2: owner reviews SQL and chooses apply path (Claude via env-var token + project ref, or owner in SQL Editor).
+Owner: set `quotes_generator` password; decide push + PR of colcaStarTours `feat/quotes-pricing-schema` → `develop`. Then A3 and B1–B4.
