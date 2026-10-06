@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Bilingual (EN/ES) tour itinerary quote generator for Colca Star Tours"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["psycopg[binary]>=3.2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
@@ -20,6 +20,7 @@ packages = ["src/quotes"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
+markers = ["integration: needs a real Postgres (set TEST_DATABASE_URL)"]
 
 [tool.ruff]
 line-length = 100
