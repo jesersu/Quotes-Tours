@@ -61,6 +61,12 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
   - S: row mapper wrapper narrowed to `CatalogDataError`/`DomainError`; the domain wraps all value-level failures in `InvalidPricingInput`, and the mapper now also rejects a child price on a non-person unit. Tests added.
   - S: CLI selects the injected repository with `is None`, not truthiness.
 - Still an owner task: `.env.example` wording (agents cannot read or edit it).
+- ccde176 + B4 (range 23e7aec..3579f06, 24 files, 1842 lines): assess medium (slice_budget_reached); consent granted by owner; reliability lens APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-0ea61c16e08e3508). Reviewed boundary advances to 3579f06. Advisory, non-blocking (owner decides):
+  - W: price-absence assertions in tests/test_cli_draft.py and tests/test_cli_sql.py can collide with digits in pytest's tmp_path (flaky).
+  - W: `validate_draft` and `render_sql` disagree (NUL text, very large duration_days) → uncaught SqlLiteralError traceback in the CLI.
+  - W: excel reader quantizes before the max-price check → InvalidOperation traceback on huge cell values.
+  - S: slug check uses `$` (accepts trailing newline); unknown draft keys silently ignored; lazy sheet-read errors not wrapped; `--force` write not atomic and file mode untested.
+- Follow-up commit `fix(catalog): harden draft and SQL export against bad input` fixes the seven advisories of lineage review-0ea61c16e08e3508: deterministic CLI price-absence assertions with synthetic prices, `validate_draft` now rejects everything the SQL renderer refuses (shared rules), huge/invalid spreadsheet prices are skipped instead of crashing, slugs use `fullmatch`, unknown draft keys are reported, lazy sheet-read failures become `SheetError`, and output files are written atomically with mode 0o600.
 
 ## Next step
-B4 owner steps (draft → review → sql → SQL Editor → `quotes catalog check`), A3, PRs.
+Owner reviews `data/private/catalog-draft.yaml` → `quotes catalog sql` → paste in the Supabase SQL Editor → `quotes catalog check`; then A3 and PRs.

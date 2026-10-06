@@ -9,7 +9,7 @@ DRAFT = {
             "id": "a-b",
             "name_es": "Campiña tour",
             "name_en": 'It\'s "quoted": yes',
-            "price_pen": "12.34",
+            "price_pen": "7391.46",
             "child_price_pen": None,
             "active": True,
             "needs_review": True,

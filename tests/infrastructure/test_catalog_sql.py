@@ -97,7 +97,7 @@ def test_script_is_a_transaction_of_upserts_without_deletes_or_ddl():
 def test_literals_and_header_and_verification_query():
     sql = render()
     assert quote_text(NASTY) in sql
-    assert "'alpha-tour'" in sql and "310.00" in sql and "55.50" in sql
+    assert "'alpha-tour'" in sql and "5183.90" in sql and "6642.08" in sql
     assert sql.startswith("-- ")
     assert "do not commit" in sql.splitlines()[1].lower() or "do not commit" in sql[:400].lower()
     assert "SQL Editor" in sql[:600]
@@ -109,3 +109,11 @@ def test_literals_and_header_and_verification_query():
 
 def test_render_is_deterministic():
     assert render() == render()
+
+
+def test_renderer_and_validator_share_the_text_and_duration_rules():
+    with pytest.raises(SqlLiteralError):
+        quote_text("bell\x07")
+    assert quote_text("tab\there\r\n") == "'tab\there\r\n'"
+    with pytest.raises(SqlLiteralError):
+        quote_int(366, maximum=365)

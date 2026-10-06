@@ -2,17 +2,38 @@
 
 from __future__ import annotations
 
+import zipfile
+import zlib
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, NamedTuple
 
 import openpyxl
+from openpyxl.utils.exceptions import InvalidFileException
 
 from quotes.application.catalog_proposal import RawRow
 
 DEFAULT_SHEET = "PRECIOS GENERAL"
 _HEADER_SEARCH_ROWS = 20
 _MAX_PRICE = Decimal("99999999.99")  # numeric(10,2)
+
+
+# In read-only mode openpyxl parses the sheet XML lazily, so a workbook that opens can still
+# fail while the header is searched or rows are iterated. These are the families the reader,
+# zipfile, zlib and the XML parser raise for damaged input: malformed XML (ParseError is a
+# SyntaxError), unreadable or truncated archives and parts, bad numbers or encodings
+# (ValueError), and dangling references (LookupError: KeyError/IndexError). Anything else
+# (for example a TypeError from our own code) is a bug and is not swallowed.
+_READER_FAILURES = (
+    OSError,
+    EOFError,
+    ValueError,
+    LookupError,
+    SyntaxError,
+    zipfile.BadZipFile,
+    zlib.error,
+    InvalidFileException,
+)
 
 
 class SheetError(Exception):
@@ -33,12 +54,13 @@ def _price(value: Any) -> Decimal | None:
         return None
     try:
         amount = Decimal(str(value).strip())
-    except InvalidOperation:
+    except (InvalidOperation, ValueError):  # ValueError: int with thousands of digits
         return None
-    if not amount.is_finite() or amount < 0:
+    # Bounds first: quantizing a huge value (1e30) would raise InvalidOperation.
+    if not amount.is_finite() or amount < 0 or amount > _MAX_PRICE:
         return None
     amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    return amount if amount <= _MAX_PRICE else None
+    return amount if amount <= _MAX_PRICE else None  # rounding can only cross the bound upward
 
 
 def _find_header(ws: Any) -> int:
@@ -84,5 +106,7 @@ def read_price_rows(path: Path, sheet: str = DEFAULT_SHEET) -> SheetRead:
                 continue
             rows.append(RawRow(name, price, number))
         return SheetRead(tuple(rows), tuple(skipped))
+    except _READER_FAILURES as exc:
+        raise SheetError(f"Cannot read workbook {path}: {type(exc).__name__}") from exc
     finally:
         workbook.close()

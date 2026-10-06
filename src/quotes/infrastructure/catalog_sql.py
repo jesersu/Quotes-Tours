@@ -14,7 +14,13 @@ from decimal import Decimal
 from typing import Any
 
 from quotes.application.catalog_proposal import VISITOR_CATEGORIES
-from quotes.infrastructure.catalog_draft import MAX_PRICE, PRICING_UNITS, ValidatedDraft
+from quotes.infrastructure.catalog_draft import (
+    MAX_DURATION_DAYS,
+    MAX_PRICE,
+    PRICING_UNITS,
+    ValidatedDraft,
+    is_safe_text,
+)
 
 
 class SqlLiteralError(ValueError):
@@ -24,8 +30,8 @@ class SqlLiteralError(ValueError):
 def quote_text(value: str) -> str:
     if not isinstance(value, str):
         raise SqlLiteralError(f"text literal expected, got {type(value).__name__}")
-    if "\x00" in value:
-        raise SqlLiteralError("text contains a NUL character")
+    if not is_safe_text(value):
+        raise SqlLiteralError("text contains a NUL or other control character")
     return "'" + value.replace("'", "''") + "'"
 
 
@@ -37,9 +43,9 @@ def quote_decimal(value: Decimal) -> str:
     return f"{value:.2f}"
 
 
-def quote_int(value: int) -> str:
-    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value < 2**31:
-        raise SqlLiteralError("integer must be between 1 and 2147483647")
+def quote_int(value: int, maximum: int = 2**31 - 1) -> str:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+        raise SqlLiteralError(f"integer must be between 1 and {maximum}")
     return str(value)
 
 
@@ -92,6 +98,10 @@ _FOOTER = """\
 """
 
 
+def _duration(value: int) -> str:
+    return quote_int(value, MAX_DURATION_DAYS)
+
+
 def _pricing_values(row: dict[str, Any]) -> list[str]:
     return [
         quote_text(row["id"]),
@@ -101,7 +111,7 @@ def _pricing_values(row: dict[str, Any]) -> list[str]:
         quote_enum(row["unit"], PRICING_UNITS),
         quote_decimal(row["price_pen"]),
         _nullable(row["child_price_pen"], quote_decimal),
-        _nullable(row["duration_days"], quote_int),
+        _nullable(row["duration_days"], _duration),
         quote_bool(row["active"]),
         _nullable(row["notes"], quote_text),
     ]

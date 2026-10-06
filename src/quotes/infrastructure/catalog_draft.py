@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import difflib
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -25,7 +27,25 @@ __all__ = [
 
 PRICING_UNITS = ("group", "day", "person", "unit")
 MAX_PRICE = Decimal("99999999.99")  # numeric(10,2)
-_SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+MAX_DURATION_DAYS = 365
+_SLUG = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")  # use fullmatch: "$" would accept a trailing "\n"
+_ALLOWED_CONTROLS = "\t\n\r"
+_TOP_KEYS = ("pricing_items", "local_payments")
+_TOOL_KEYS = ("source_name", "needs_review", "review_hint")  # written by `quotes catalog draft`
+_PRICING_KEYS = (
+    "id",
+    "name_es",
+    "name_en",
+    "category",
+    "unit",
+    "duration_days",
+    "price_pen",
+    "child_price_pen",
+    "active",
+    "notes",
+    *_TOOL_KEYS,
+)
+_LOCAL_KEYS = ("id", "name_es", "name_en", "prices", "active", "notes", *_TOOL_KEYS)
 
 HEADER = """\
 # Catalog draft generated from the price spreadsheet. PRIVATE: do not commit it.
@@ -37,6 +57,15 @@ HEADER = """\
 #   - Keep price_pen as a quoted string with two decimals, for example "12.34".
 #   - source_name is the original spreadsheet text, kept for reference only.
 """
+
+
+def is_safe_text(value: str) -> bool:
+    """Text the SQL export can carry: no NUL or other control characters, no lone surrogates.
+
+    Tab, newline and carriage return are allowed (notes may span lines). This is the single
+    rule shared by draft validation and the SQL renderer.
+    """
+    return all(c in _ALLOWED_CONTROLS or unicodedata.category(c) not in ("Cc", "Cs") for c in value)
 
 
 def dump_draft(draft: Mapping[str, Any]) -> str:
@@ -84,6 +113,9 @@ def _text(entry: Mapping[str, Any], key: str, label: str, problems: list[str]) -
     if not isinstance(value, str) or not value.strip():
         problems.append(f"{label}: {key} must be non-empty text")
         return None
+    if not is_safe_text(value):
+        problems.append(f"{label}: {key} contains a NUL or other control character")
+        return None
     return value
 
 
@@ -93,7 +125,7 @@ def _check_common(
     """Checks shared by both lists: id, review flag, active, notes. Returns (id, usable)."""
     start = len(problems)
     entry_id = entry.get("id")
-    if not isinstance(entry_id, str) or not _SLUG.match(entry_id):
+    if not isinstance(entry_id, str) or not _SLUG.fullmatch(entry_id):
         problems.append(f"{label}: id must be a lowercase slug (a-z, 0-9, hyphens)")
         entry_id = None
     elif entry_id in seen:
@@ -110,6 +142,8 @@ def _check_common(
     notes = entry.get("notes")
     if notes is not None and not isinstance(notes, str):
         problems.append(f"{label}: notes must be text or null")
+    elif isinstance(notes, str) and not is_safe_text(notes):
+        problems.append(f"{label}: notes contains a NUL or other control character")
     return entry_id, len(problems) == start
 
 
@@ -129,8 +163,12 @@ def _pricing_row(entry: Mapping[str, Any], label: str, problems: list[str]) -> d
     if child is not None and row["child_price_pen"] is None:
         problems.append(f"{label}: child_price_pen must be null or a valid amount")
     days = entry.get("duration_days")
-    if days is not None and (isinstance(days, bool) or not isinstance(days, int) or days < 1):
-        problems.append(f"{label}: duration_days must be null or a whole number >= 1")
+    if days is not None and (
+        isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= MAX_DURATION_DAYS
+    ):
+        problems.append(
+            f"{label}: duration_days must be null or a whole number from 1 to {MAX_DURATION_DAYS}"
+        )
     row["duration_days"] = days
     row["notes"] = entry.get("notes")
     row["active"] = entry.get("active", True)
@@ -167,6 +205,23 @@ def _local_rows(
     return row, price_rows
 
 
+def _shown(entry_id: Any) -> str:
+    """The id for messages: a valid slug as is, anything else escaped (no raw control chars)."""
+    return entry_id if isinstance(entry_id, str) and _SLUG.fullmatch(entry_id) else repr(entry_id)
+
+
+def _unknown_keys(
+    data: Mapping[Any, Any], allowed: tuple[str, ...], label: str, problems: list[str]
+) -> None:
+    for key in data:
+        if key in allowed:
+            continue
+        text = str(key)
+        close = difflib.get_close_matches(text, allowed, n=1) if isinstance(key, str) else []
+        hint = f"; did you mean '{close[0]}'?" if close else ""
+        problems.append(f"{label}: unknown key {text!r}{hint}")
+
+
 def _entries(data: Mapping[str, Any], key: str, problems: list[str]) -> list[Any]:
     value = data.get(key, [])
     if value is None:
@@ -186,6 +241,7 @@ def validate_draft(data: Any) -> ValidatedDraft:
         return ValidatedDraft(
             (), (), (), ("draft must be a mapping with pricing_items and local_payments lists",), ()
         )
+    _unknown_keys(data, _TOP_KEYS, "draft", problems)
     pricing = _entries(data, "pricing_items", problems)
     locals_ = _entries(data, "local_payments", problems)
     if not pricing and not locals_ and not problems:
@@ -201,7 +257,8 @@ def validate_draft(data: Any) -> ValidatedDraft:
         if not isinstance(entry, Mapping):
             problems.append(f"{label}: must be a mapping")
             continue
-        label = f"{label} ({entry.get('id')})"
+        label = f"{label} ({_shown(entry.get('id'))})"
+        _unknown_keys(entry, _PRICING_KEYS, label, problems)
         _check_common(entry, label, seen_items, problems)
         item_rows.append(_pricing_row(entry, label, problems))
     for index, entry in enumerate(locals_):
@@ -209,7 +266,8 @@ def validate_draft(data: Any) -> ValidatedDraft:
         if not isinstance(entry, Mapping):
             problems.append(f"{label}: must be a mapping")
             continue
-        label = f"{label} ({entry.get('id')})"
+        label = f"{label} ({_shown(entry.get('id'))})"
+        _unknown_keys(entry, _LOCAL_KEYS, label, problems)
         _check_common(entry, label, seen_locals, problems)
         row, prices = _local_rows(entry, label, problems)
         local_rows.append(row)

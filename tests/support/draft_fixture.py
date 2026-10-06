@@ -18,8 +18,8 @@ def valid_draft() -> dict[str, Any]:
                 "category": "activity",
                 "unit": "person",
                 "duration_days": None,
-                "price_pen": "12.34",
-                "child_price_pen": "7.50",
+                "price_pen": "7391.46",
+                "child_price_pen": "2468.13",
                 "active": True,
                 "notes": "synthetic note",
                 "source_name": "ALPHA  TOUR",
@@ -33,7 +33,7 @@ def valid_draft() -> dict[str, Any]:
                 "category": "transport",
                 "unit": "group",
                 "duration_days": 2,
-                "price_pen": "310.00",
+                "price_pen": "5183.90",
                 "child_price_pen": None,
                 "active": True,
                 "notes": None,
@@ -46,9 +46,9 @@ def valid_draft() -> dict[str, Any]:
                 "name_es": "Boleto gamma",
                 "name_en": "Gamma ticket",
                 "prices": {
-                    "latin_american_adult": "20.50",
-                    "foreign_adult": "55.50",
-                    "child_6_15": "10.25",
+                    "latin_american_adult": "3017.52",
+                    "foreign_adult": "6642.08",
+                    "child_6_15": "1259.37",
                 },
                 "active": True,
                 "notes": None,
@@ -63,3 +63,9 @@ def mutate(**changes: Any) -> dict[str, Any]:
     draft = copy.deepcopy(valid_draft())
     draft["pricing_items"][0].update(changes)
     return draft
+
+
+def without_path_lines(text: str, *paths: Any) -> str:
+    """Drop every line mentioning one of the paths (tmp_path digits could collide with prices)."""
+    shown = [str(p) for p in paths]
+    return "\n".join(line for line in text.splitlines() if not any(p in line for p in shown))

@@ -47,14 +47,14 @@ def test_generated_sql_loads_back_idempotently_and_upserts(dsn):  # noqa: F811
     assert load.ok, load.issues
     alpha = load.catalog.get_item("alpha-tour")
     assert alpha.name_es == NASTY
-    assert alpha.item.unit_price.amount == Decimal("12.34")
-    assert alpha.item.child_unit_price.amount == Decimal("7.50")
+    assert alpha.item.unit_price.amount == Decimal("7391.46")
+    assert alpha.item.child_unit_price.amount == Decimal("2468.13")
     assert load.catalog.get_item("beta-transport-2-days").duration_days == 2
     ticket = load.catalog.local_payment("gamma-ticket")
     assert {p.category.value: p.price.amount for p in ticket.info.prices} == {
-        "latin_american_adult": Decimal("20.50"),
-        "foreign_adult": Decimal("55.50"),
-        "child_6_15": Decimal("10.25"),
+        "latin_american_adult": Decimal("3017.52"),
+        "foreign_adult": Decimal("6642.08"),
+        "child_6_15": Decimal("1259.37"),
     }
     assert counts(dsn) == [2, 1, 3]
 

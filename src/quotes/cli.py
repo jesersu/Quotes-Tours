@@ -13,7 +13,7 @@ import psycopg
 from quotes.application.catalog import CatalogLoad, CatalogRepository
 from quotes.application.catalog_proposal import propose_catalog
 from quotes.infrastructure.catalog_draft import dump_draft, load_draft, validate_draft
-from quotes.infrastructure.catalog_sql import render_sql
+from quotes.infrastructure.catalog_sql import SqlLiteralError, render_sql
 from quotes.infrastructure.excel_price_sheet import DEFAULT_SHEET, SheetError, read_price_rows
 from quotes.infrastructure.output_file import OutputExists, write_new_file
 from quotes.infrastructure.postgres_catalog import PostgresCatalogRepository
@@ -102,7 +102,13 @@ def _sql(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
             print(f"  - {problem}", file=err)
         return EXIT_CATALOG_ERRORS
     try:
-        write_new_file(args.output, render_sql(draft), force=args.force)
+        sql = render_sql(draft)
+    except SqlLiteralError as exc:
+        # Validation and rendering share their rules, so this is a defensive net, not a path.
+        print(f"error: cannot render the SQL ({exc}); nothing written", file=err)
+        return EXIT_CATALOG_ERRORS
+    try:
+        write_new_file(args.output, sql, force=args.force)
     except OutputExists as exc:
         print(f"error: {exc}", file=err)
         return EXIT_UNAVAILABLE
