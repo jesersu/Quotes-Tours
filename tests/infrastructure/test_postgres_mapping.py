@@ -10,6 +10,7 @@ from quotes.domain.errors import InvalidPricingInput
 from quotes.infrastructure.postgres_catalog import (
     CatalogDataError,
     PostgresCatalogRepository,
+    build_catalog_load,
     map_local_payment_row,
     map_pricing_row,
 )
@@ -94,3 +95,56 @@ def test_connection_failure_is_not_swallowed():
     )
     with pytest.raises(psycopg.OperationalError):
         repo.load()
+
+
+def local_row(item_id="sample-ticket"):
+    return {"id": item_id, "name_es": "Boleto", "name_en": "Ticket", "notes": None}
+
+
+def price_row(item_id="sample-ticket", category="foreign_adult", price="1.00"):
+    return {"item_id": item_id, "visitor_category": category, "price_pen": Decimal(price)}
+
+
+def test_build_load_excludes_a_bad_pricing_row_and_reports_it():
+    loaded = build_catalog_load(
+        [pricing_row(id="good"), pricing_row(id="bad", unit="fortnight")], [], []
+    )
+    assert [e.id for e in loaded.catalog.items()] == ["good"]
+    (issue,) = loaded.errors
+    assert (issue.code, issue.subject_id) == ("invalid_row", "bad")
+    assert "fortnight" in issue.message
+
+
+def test_build_load_reports_domain_violations_as_row_errors():
+    loaded = build_catalog_load([pricing_row(id="bad", duration_days=0)], [], [])
+    (issue,) = loaded.errors
+    assert issue.subject_id == "bad"
+    assert "1 day" in issue.message
+
+
+def test_build_load_excludes_a_local_item_without_prices():
+    loaded = build_catalog_load([pricing_row()], [local_row("priceless")], [])
+    assert loaded.catalog.local_payments() == ()
+    (issue,) = loaded.errors
+    assert (issue.code, issue.subject_id) == ("no_prices", "priceless")
+
+
+def test_build_load_keeps_a_partially_priced_local_item_with_a_warning():
+    loaded = build_catalog_load([pricing_row()], [local_row()], [price_row()])
+    assert [e.id for e in loaded.catalog.local_payments()] == ["sample-ticket"]
+    assert loaded.errors == ()
+    (issue,) = loaded.warnings
+    assert (issue.code, issue.subject_id) == ("missing_visitor_category", "sample-ticket")
+
+
+def test_build_load_warns_about_an_empty_catalog():
+    loaded = build_catalog_load([], [], [])
+    assert [i.code for i in loaded.warnings] == ["empty_catalog"]
+    assert loaded.ok
+
+
+def test_build_load_lets_programming_errors_surface():
+    row = pricing_row()
+    del row["unit"]
+    with pytest.raises(KeyError):
+        build_catalog_load([row], [], [])

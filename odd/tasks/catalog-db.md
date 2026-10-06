@@ -33,7 +33,7 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
 - [ ] A3 — Follow-up: re-vendor `colcastar-admin/test/sql/schema.sql` (drift test). Route: inline mechanical.
 - [x] B1 — `CatalogRepository` port + in-memory catalog. Route: delegated writer. Evidence: RED (ModuleNotFoundError quotes.application.catalog) then GREEN 105 passed; ruff format/check clean. `CatalogEntry`/`LocalPaymentEntry` wrap domain objects with bilingual names, category, duration, notes; domain untouched.
 - [x] B2 — Postgres adapter + integration tests (CI service, `TEST_DATABASE_URL`, vendored quotes DDL + drift check). Route: delegated writer. Evidence: RED (ModuleNotFoundError settings/postgres_catalog) then GREEN against throwaway local Postgres 14: 122 passed + 1 skipped (drift, source absent); with COLCASTAR_REPO set: 123 passed; TEST_DATABASE_URL unset: 110 passed, 13 skipped. Migration runs unchanged on PG14. CI postgres:16 service added (not yet run in CI).
-- [ ] B3 — `quotes catalog check`. Route: delegated writer.
+- [x] B3 — `quotes catalog check` + degrade instead of crash. Route: delegated writer. Evidence: RED (collection errors: missing CatalogLoad/audit_catalog/quotes.cli/build_catalog_load) then GREEN against throwaway local Postgres 14: 179 passed, 1 skipped (drift). Port is now `load() -> CatalogLoad(catalog, issues)`; bad rows become error issues and are excluded. Console script run: clean data exit 0; active local payment item without prices exit 1 with the issue listed; missing DATABASE_URL exit 2.
 - [ ] B4 — Excel → reviewed draft (`data/private/`) → `quotes catalog import`. Route: delegated writer.
 
 ## Acceptance criteria
@@ -43,7 +43,7 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
 
 ## Progress
 - colcaStarTours `feat/quotes-pricing-schema`: schema migration applied to Supabase (A1, A2); A3 pending.
-- Quotes-Tours `feat/catalog-01-db`: B1, B2 done and reviewed; advisory fixes (unit F) applied; B3 in progress; B4 pending.
+- Quotes-Tours `feat/catalog-01-db`: B1, B2 done and reviewed; advisory fixes (unit F) applied; B3 done; B4 pending.
 
 ## Review log
 - B1–B2 (range main..41edbf1, 19 files, 874 lines): assess risk=high (shell in ci.yml), review due; consent granted by owner; 4 lenses (risk, resilience, readability, reliability) APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-13809761c345a5f6). Reviewed boundary advances to 41edbf1.
@@ -55,4 +55,4 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
 - Unit F (after 41edbf1): fixed the integration fixture guard (local hosts only, non-clobbering prelude), drift test honesty (COLCASTAR_REPO), connect/statement timeouts, explicit unknown-unit/visitor-category errors, typed `_index`, ungated connection-failure test, extra mapper and blank-name tests, stale Progress. The "one unmappable row fails `load()`" advisory is addressed by B3. Not done: `.env.example` wording (file edits denied by the sandbox).
 
 ## Next step
-B3 (`quotes catalog check`, invalid rows reported instead of crashing), then B4 (Excel import), A3, PRs.
+B4 (Excel import), A3, PRs.

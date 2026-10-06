@@ -43,4 +43,18 @@ vendored copy of the colcaStarTours migration. The drift test compares it only w
 `COLCASTAR_REPO` points at a colcaStarTours checkout (checked locally; not enforced in CI); if the
 variable is set but the migration file is missing, the test fails.
 
+## Checking the catalog
+
+```bash
+set -a; source .env; set +a
+.venv/bin/quotes catalog check
+```
+
+Loads the active catalog and prints the counts plus one line per issue (`error <id>: ...`,
+`warning <id>: ...`, errors first). Rows that cannot be mapped (for example an active local payment
+item whose prices are not entered yet) are reported and excluded instead of crashing; local items
+missing a visitor category and an empty catalog are warnings. Exit codes: `0` no errors
+(warnings allowed), `1` at least one error, `2` configuration or connection failure (the message
+never includes the connection string).
+
 Business data (price spreadsheets) is never committed; this repository is public.

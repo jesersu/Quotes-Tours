@@ -10,7 +10,14 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-from quotes.application.catalog import Catalog, CatalogEntry, LocalPaymentEntry
+from quotes.application.catalog import (
+    Catalog,
+    CatalogEntry,
+    CatalogIssue,
+    CatalogLoad,
+    LocalPaymentEntry,
+    audit_catalog,
+)
 from quotes.domain.catalog import CatalogItem, PricingUnit
 from quotes.domain.errors import DomainError
 from quotes.domain.local_payment import LocalPaymentInfo, LocalPrice, VisitorCategory
@@ -48,7 +55,7 @@ _LOCAL_PRICES_SQL = """
 
 
 class CatalogDataError(Exception):
-    """Raised when a catalog row cannot be mapped; the message names the offending row."""
+    """A catalog row holds an unsupported value; the message names the row and column."""
 
 
 def _pen(amount: Decimal) -> Money:
@@ -126,7 +133,7 @@ class PostgresCatalogRepository:
         self._connect_timeout = connect_timeout
         self._statement_timeout_ms = statement_timeout_ms
 
-    def load(self) -> Catalog:
+    def load(self) -> CatalogLoad:
         with psycopg.connect(
             self._dsn, row_factory=dict_row, connect_timeout=self._connect_timeout
         ) as conn:
@@ -140,22 +147,51 @@ class PostgresCatalogRepository:
             local_rows = conn.execute(_LOCAL_ITEMS_SQL).fetchall()
             price_rows = conn.execute(_LOCAL_PRICES_SQL).fetchall()
 
-        prices_by_item: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for price_row in price_rows:
-            prices_by_item[price_row["item_id"]].append(price_row)
-
-        entries = [_mapped("pricing item", r, map_pricing_row) for r in item_rows]
-        local = [
-            _mapped("local payment item", r, lambda row: map_local_payment_row(row, prices_by_item))
-            for r in local_rows
-        ]
-        return Catalog(entries, local)
+        return build_catalog_load(item_rows, local_rows, price_rows)
 
 
-def _mapped[T](kind: str, row: dict[str, Any], mapper: Callable[[dict[str, Any]], T]) -> T:
+def build_catalog_load(
+    item_rows: list[dict[str, Any]],
+    local_rows: list[dict[str, Any]],
+    price_rows: list[dict[str, Any]],
+) -> CatalogLoad:
+    """Map rows one by one. Unmappable rows become error issues and are excluded.
+
+    Programming errors (for example a missing column) are not data errors and still raise.
+    """
+    prices_by_item: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for price_row in price_rows:
+        prices_by_item[price_row["item_id"]].append(price_row)
+
+    issues: list[CatalogIssue] = []
+    entries: list[CatalogEntry] = []
+    for row in item_rows:
+        mapped = _mapped(row, map_pricing_row, issues)
+        if mapped is not None:
+            entries.append(mapped)
+
+    local: list[LocalPaymentEntry] = []
+    for row in local_rows:
+        if not prices_by_item.get(row["id"]):
+            issues.append(
+                CatalogIssue(
+                    "error", "no_prices", row["id"], "Active local payment item has no prices"
+                )
+            )
+            continue
+        mapped_local = _mapped(row, lambda r: map_local_payment_row(r, prices_by_item), issues)
+        if mapped_local is not None:
+            local.append(mapped_local)
+
+    catalog = Catalog(entries, local)
+    return CatalogLoad(catalog, (*issues, *audit_catalog(catalog)))
+
+
+def _mapped[T](
+    row: dict[str, Any], mapper: Callable[[dict[str, Any]], T], issues: list[CatalogIssue]
+) -> T | None:
     try:
         return mapper(row)
-    except CatalogDataError:
-        raise
-    except DomainError as exc:
-        raise CatalogDataError(f"Cannot map {kind} '{row['id']}': {exc}") from exc
+    except (CatalogDataError, DomainError) as exc:
+        issues.append(CatalogIssue("error", "invalid_row", row["id"], str(exc)))
+        return None

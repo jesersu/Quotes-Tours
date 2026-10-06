@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from quotes.domain.catalog import CatalogItem
 from quotes.domain.errors import DomainError, InvalidPricingInput
-from quotes.domain.local_payment import LocalPaymentInfo
+from quotes.domain.local_payment import LocalPaymentInfo, VisitorCategory
 
 
 class CatalogItemNotFound(DomainError):
@@ -110,7 +110,66 @@ class Catalog:
         return tuple(self._local_payments.values())
 
 
+Severity = Literal["error", "warning"]
+
+
+@dataclass(frozen=True)
+class CatalogIssue:
+    """A problem found while loading the catalog. Errors exclude the row; warnings keep it."""
+
+    severity: Severity
+    code: str
+    subject_id: str
+    message: str
+
+    def __post_init__(self) -> None:
+        if self.severity not in ("error", "warning"):
+            raise ValueError(f"Unknown issue severity: {self.severity!r}")
+
+
+@dataclass(frozen=True)
+class CatalogLoad:
+    """The valid catalog plus everything that was reported (or excluded) while loading it."""
+
+    catalog: Catalog
+    issues: tuple[CatalogIssue, ...] = ()
+
+    @property
+    def errors(self) -> tuple[CatalogIssue, ...]:
+        return tuple(i for i in self.issues if i.severity == "error")
+
+    @property
+    def warnings(self) -> tuple[CatalogIssue, ...]:
+        return tuple(i for i in self.issues if i.severity == "warning")
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+
+def audit_catalog(catalog: Catalog) -> tuple[CatalogIssue, ...]:
+    """Warnings about a catalog that is valid but looks incomplete."""
+    issues: list[CatalogIssue] = []
+    if not catalog.items():
+        issues.append(
+            CatalogIssue("warning", "empty_catalog", "catalog", "No active pricing items found")
+        )
+    for local in catalog.local_payments():
+        present = {p.category for p in local.info.prices}
+        missing = [c.value for c in VisitorCategory if c not in present]
+        if missing:
+            issues.append(
+                CatalogIssue(
+                    "warning",
+                    "missing_visitor_category",
+                    local.id,
+                    f"No price for visitor category: {', '.join(missing)}",
+                )
+            )
+    return tuple(issues)
+
+
 class CatalogRepository(Protocol):
-    def load(self) -> Catalog:
-        """Return the active catalog."""
+    def load(self) -> CatalogLoad:
+        """Return the active catalog; unusable rows are reported as issues, not raised."""
         ...

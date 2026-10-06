@@ -5,11 +5,14 @@ import pytest
 from quotes.application.catalog import (
     Catalog,
     CatalogEntry,
+    CatalogIssue,
     CatalogItemNotFound,
+    CatalogLoad,
     CatalogRepository,
     DuplicateCatalogId,
     LocalPaymentEntry,
     LocalPaymentNotFound,
+    audit_catalog,
 )
 from quotes.domain.catalog import CatalogItem, PricingUnit
 from quotes.domain.errors import DomainError, InvalidPricingInput
@@ -111,8 +114,57 @@ def test_empty_catalog():
 def test_in_memory_repository_returns_its_catalog():
     catalog = Catalog(entries=[entry()])
     repo: CatalogRepository = InMemoryCatalogRepository(catalog)
-    assert repo.load() is catalog
+    loaded = repo.load()
+    assert loaded.catalog is catalog
+    assert loaded.issues == ()
+    assert loaded.ok
 
 
 def test_in_memory_repository_defaults_to_empty():
-    assert InMemoryCatalogRepository().load().items() == ()
+    assert InMemoryCatalogRepository().load().catalog.items() == ()
+
+
+def test_in_memory_repository_can_carry_issues():
+    issue = CatalogIssue("error", "invalid_row", "bad-item", "broken")
+    assert InMemoryCatalogRepository(issues=(issue,)).load().issues == (issue,)
+
+
+def test_issue_rejects_unknown_severity():
+    with pytest.raises(ValueError, match="severity"):
+        CatalogIssue("fatal", "x", "id", "msg")
+
+
+def test_load_separates_errors_from_warnings():
+    err = CatalogIssue("error", "invalid_row", "a", "broken")
+    warn = CatalogIssue("warning", "empty_catalog", "catalog", "empty")
+    loaded = CatalogLoad(Catalog(), (warn, err))
+    assert loaded.errors == (err,)
+    assert loaded.warnings == (warn,)
+    assert not loaded.ok
+
+
+def test_warnings_alone_keep_the_load_ok():
+    warn = CatalogIssue("warning", "empty_catalog", "catalog", "empty")
+    assert CatalogLoad(Catalog(), (warn,)).ok
+
+
+def test_audit_warns_about_an_empty_catalog():
+    issues = audit_catalog(Catalog(local_payments=[local_entry()]))
+    assert [(i.severity, i.code, i.subject_id) for i in issues] == [
+        ("warning", "empty_catalog", "catalog"),
+        ("warning", "missing_visitor_category", "sample-ticket"),
+    ]
+
+
+def test_audit_names_the_missing_visitor_categories():
+    (issue,) = audit_catalog(Catalog(entries=[entry()], local_payments=[local_entry()]))
+    assert issue.code == "missing_visitor_category"
+    assert "latin_american_adult" in issue.message
+    assert "child_6_15" in issue.message
+    assert "foreign_adult" not in issue.message
+
+
+def test_audit_is_silent_for_a_complete_catalog():
+    prices = tuple(LocalPrice(c, pen("1.00")) for c in VisitorCategory)
+    full = LocalPaymentEntry("full-ticket", LocalPaymentInfo("Full", prices), "Completo", "Full")
+    assert audit_catalog(Catalog(entries=[entry()], local_payments=[full])) == ()

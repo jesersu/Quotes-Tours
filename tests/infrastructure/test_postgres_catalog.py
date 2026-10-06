@@ -16,7 +16,7 @@ from quotes.application.catalog import CatalogRepository
 from quotes.domain.catalog import PricingUnit
 from quotes.domain.local_payment import VisitorCategory
 from quotes.domain.money import Currency
-from quotes.infrastructure.postgres_catalog import CatalogDataError, PostgresCatalogRepository
+from quotes.infrastructure.postgres_catalog import PostgresCatalogRepository
 from tests.support.db_guard import assert_local_database
 
 pytestmark = [
@@ -59,11 +59,11 @@ def add_item(run, item_id, unit="group", price="1.10", child=None, active=True, 
 
 def test_satisfies_the_port(dsn):
     repo: CatalogRepository = PostgresCatalogRepository(dsn)
-    assert repo.load().items() == ()
+    assert repo.load().catalog.items() == ()
 
 
 def test_empty_database_gives_empty_catalog(dsn):
-    catalog = PostgresCatalogRepository(dsn).load()
+    catalog = PostgresCatalogRepository(dsn).load().catalog
     assert catalog.items() == ()
     assert catalog.local_payments() == ()
 
@@ -79,7 +79,7 @@ def test_empty_database_gives_empty_catalog(dsn):
 )
 def test_maps_each_unit(run, dsn, db_unit, domain_unit):
     add_item(run, "sample-item", unit=db_unit, price="2.50", days=2)
-    entry = PostgresCatalogRepository(dsn).load().get_item("sample-item")
+    entry = PostgresCatalogRepository(dsn).load().catalog.get_item("sample-item")
     assert entry.item.unit is domain_unit
     assert entry.item.unit_price.currency is Currency.PEN
     assert entry.item.unit_price.amount == Decimal("2.50")
@@ -96,14 +96,19 @@ def test_maps_each_unit(run, dsn, db_unit, domain_unit):
 
 def test_maps_child_price(run, dsn):
     add_item(run, "sample-person", unit="person", price="3.30", child="1.15")
-    item = PostgresCatalogRepository(dsn).load().get_item("sample-person").item
+    item = PostgresCatalogRepository(dsn).load().catalog.get_item("sample-person").item
     assert item.child_unit_price.amount == Decimal("1.15")
     assert item.child_unit_price.currency is Currency.PEN
 
 
 def test_decimal_precision_is_preserved(run, dsn):
     add_item(run, "sample-precise", price="0.07")
-    amount = PostgresCatalogRepository(dsn).load().get_item("sample-precise").item.unit_price.amount
+    amount = (
+        PostgresCatalogRepository(dsn)
+        .load()
+        .catalog.get_item("sample-precise")
+        .item.unit_price.amount
+    )
     assert amount == Decimal("0.07")
     assert isinstance(amount, Decimal)
 
@@ -116,7 +121,7 @@ def test_inactive_rows_are_excluded(run, dsn):
         " values ('retired-ticket', 'x', 'x', false)"
     )
     run("insert into quotes.local_payment_prices values ('retired-ticket', 'foreign_adult', 1)")
-    catalog = PostgresCatalogRepository(dsn).load()
+    catalog = PostgresCatalogRepository(dsn).load().catalog
     assert [e.id for e in catalog.items()] == ["active-item"]
     assert catalog.local_payments() == ()
 
@@ -135,7 +140,7 @@ def test_maps_local_payment_with_three_categories(run, dsn):
             "insert into quotes.local_payment_prices values ('sample-ticket', %s, %s)",
             (category, price),
         )
-    entry = PostgresCatalogRepository(dsn).load().local_payment("sample-ticket")
+    entry = PostgresCatalogRepository(dsn).load().catalog.local_payment("sample-ticket")
     assert (entry.name_es, entry.name_en, entry.notes) == (
         "Boleto de muestra",
         "Sample ticket",
@@ -148,18 +153,39 @@ def test_maps_local_payment_with_three_categories(run, dsn):
     assert entry.info.price_for(VisitorCategory.CHILD_6_15).currency is Currency.PEN
 
 
-def test_unmappable_local_payment_names_the_row(run, dsn):
+def test_active_local_item_without_prices_is_reported_not_fatal(run, dsn):
+    add_item(run, "good-item")
     run(
         "insert into quotes.local_payment_items (id, name_es, name_en)"
         " values ('priceless-ticket', 'x', 'x')"
     )
-    with pytest.raises(CatalogDataError, match="priceless-ticket"):
-        PostgresCatalogRepository(dsn).load()
+    loaded = PostgresCatalogRepository(dsn).load()
+    assert [e.id for e in loaded.catalog.items()] == ["good-item"]
+    assert loaded.catalog.local_payments() == ()
+    (issue,) = loaded.errors
+    assert (issue.code, issue.subject_id) == ("no_prices", "priceless-ticket")
+
+
+def test_partially_priced_local_item_is_kept_with_a_warning(run, dsn):
+    add_item(run, "good-item")
+    run(
+        "insert into quotes.local_payment_items (id, name_es, name_en)"
+        " values ('partial-ticket', 'x', 'x')"
+    )
+    run("insert into quotes.local_payment_prices values ('partial-ticket', 'foreign_adult', 1)")
+    loaded = PostgresCatalogRepository(dsn).load()
+    assert [e.id for e in loaded.catalog.local_payments()] == ["partial-ticket"]
+    assert loaded.errors == ()
+    assert [i.code for i in loaded.warnings] == ["missing_visitor_category"]
+
+
+def test_empty_database_warns(dsn):
+    assert [i.code for i in PostgresCatalogRepository(dsn).load().warnings] == ["empty_catalog"]
 
 
 def test_statement_timeout_is_applied_to_the_session(dsn):
     repo = PostgresCatalogRepository(dsn, statement_timeout_ms=4321)
-    assert repo.load().items() == ()
+    assert repo.load().catalog.items() == ()
     with psycopg.connect(dsn, options="-c statement_timeout=4321") as conn:
         assert conn.execute("show statement_timeout").fetchone() == ("4321ms",)
 
