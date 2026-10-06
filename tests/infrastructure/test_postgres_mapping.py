@@ -148,3 +148,68 @@ def test_build_load_lets_programming_errors_surface():
     del row["unit"]
     with pytest.raises(KeyError):
         build_catalog_load([row], [], [])
+
+
+def test_build_load_reports_negative_price_and_keeps_valid_rows():
+    loaded = build_catalog_load(
+        [
+            pricing_row(id="good-a"),
+            pricing_row(id="negative", price_pen=Decimal("-1.00")),
+            pricing_row(id="good-b"),
+        ],
+        [],
+        [],
+    )
+    assert [e.id for e in loaded.catalog.items()] == ["good-a", "good-b"]
+    (issue,) = loaded.errors
+    assert (issue.code, issue.subject_id) == ("invalid_row", "negative")
+
+
+def test_build_load_reports_child_price_on_a_non_person_unit():
+    loaded = build_catalog_load(
+        [
+            pricing_row(id="good"),
+            pricing_row(id="group-child", unit="group", child_price_pen=Decimal("1.00")),
+        ],
+        [],
+        [],
+    )
+    assert [e.id for e in loaded.catalog.items()] == ["good"]
+    (issue,) = loaded.errors
+    assert (issue.code, issue.subject_id) == ("invalid_row", "group-child")
+    assert "child_price_pen" in issue.message
+
+
+def test_child_price_on_a_person_unit_is_accepted():
+    entry = map_pricing_row(
+        pricing_row(unit="person", price_pen=Decimal("2.00"), child_price_pen=Decimal("1.00"))
+    )
+    assert entry.item.child_unit_price is not None
+
+
+@pytest.mark.parametrize("value", [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
+def test_build_load_reports_non_finite_numbers(value):
+    loaded = build_catalog_load(
+        [pricing_row(id="good"), pricing_row(id="odd", price_pen=value)], [], []
+    )
+    assert [e.id for e in loaded.catalog.items()] == ["good"]
+    (issue,) = loaded.errors
+    assert (issue.code, issue.subject_id) == ("invalid_row", "odd")
+
+
+def test_build_load_reports_non_finite_local_price_and_keeps_valid_rows():
+    loaded = build_catalog_load(
+        [],
+        [local_row("good-ticket"), local_row("odd-ticket")],
+        [price_row("good-ticket"), price_row("odd-ticket", price="NaN")],
+    )
+    assert [e.id for e in loaded.catalog.local_payments()] == ["good-ticket"]
+    (issue,) = loaded.errors
+    assert issue.subject_id == "odd-ticket"
+
+
+def test_build_load_still_raises_on_a_missing_column():
+    row = pricing_row()
+    del row["price_pen"]
+    with pytest.raises(KeyError):
+        build_catalog_load([row], [], [])

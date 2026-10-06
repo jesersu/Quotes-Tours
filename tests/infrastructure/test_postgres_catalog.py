@@ -183,13 +183,6 @@ def test_empty_database_warns(dsn):
     assert [i.code for i in PostgresCatalogRepository(dsn).load().warnings] == ["empty_catalog"]
 
 
-def test_statement_timeout_is_applied_to_the_session(dsn):
-    repo = PostgresCatalogRepository(dsn, statement_timeout_ms=4321)
-    assert repo.load().catalog.items() == ()
-    with psycopg.connect(dsn, options="-c statement_timeout=4321") as conn:
-        assert conn.execute("show statement_timeout").fetchone() == ("4321ms",)
-
-
 def test_slow_statement_is_cancelled_by_the_timeout(dsn, monkeypatch):
     import quotes.infrastructure.postgres_catalog as adapter
 

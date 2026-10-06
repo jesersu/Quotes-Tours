@@ -96,3 +96,13 @@ def test_unknown_command_is_a_usage_error():
     with pytest.raises(SystemExit) as info:
         run(["catalog", "explode"], repository=InMemoryCatalogRepository())
     assert info.value.code == 2
+
+
+def test_injected_repository_is_used_even_when_it_is_falsy():
+    class FalsyRepository(InMemoryCatalogRepository):
+        def __bool__(self) -> bool:
+            return False
+
+    code, out, _ = run(["catalog", "check"], repository=FalsyRepository(catalog()))
+    assert code == 0
+    assert "pricing items: 1" in out

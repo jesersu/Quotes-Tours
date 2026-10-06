@@ -28,7 +28,10 @@ The pricing catalog lives in the `quotes` schema of the shared Postgres (read-on
 
 - `DATABASE_URL`: read-only connection (see `.env.example`). Load it with `set -a; source .env; set +a`.
 - `TEST_DATABASE_URL`: scratch database for integration tests. The tests refuse to run unless
-  its host is local (`localhost`, `127.0.0.1`, `::1` or a unix socket); there is no override.
+  the DSN names an explicit local host (`localhost`, `127.0.0.1`, `::1` or a unix socket
+  directory); a DSN without a host, or with a `service` entry, is rejected. They also refuse to
+  run while `PGSERVICE`, `PGSERVICEFILE` or `PGHOSTADDR` is set, or `PGHOST` is set to a
+  non-local value, because these variables can redirect the connection. There is no override.
   Its fixture drops and recreates the `quotes` schema and creates the roles `anon` and
   `authenticated`, `public.app_role`, `public.set_updated_at` and `public.has_role` only when
   they do not already exist (existing objects are never replaced).

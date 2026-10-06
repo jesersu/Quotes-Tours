@@ -53,6 +53,13 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
   - W: drift test default path does not match README and never runs in CI.
   - S: no connect/statement timeout; opaque unknown-unit message; `_index` getattr indirection; connection-failure test gated by DB skip; untested pricing-item mapping error and local-entry blank `name_en`; stale Progress/Next step in this doc.
 - Unit F (after 41edbf1): fixed the integration fixture guard (local hosts only, non-clobbering prelude), drift test honesty (COLCASTAR_REPO), connect/statement timeouts, explicit unknown-unit/visitor-category errors, typed `_index`, ungated connection-failure test, extra mapper and blank-name tests, stale Progress. The "one unmappable row fails `load()`" advisory is addressed by B3. Not done: `.env.example` wording (file edits denied by the sandbox).
+- F+B3 (range 41edbf1..23e7aec): assess medium (slice_budget_reached); consent granted by owner; reliability lens APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-893ff74f86765df0). Reviewed boundary advances to 23e7aec.
+- Advisory, non-blocking (all four fixed by the follow-up commit `fix(catalog): close test-database guard bypass and review follow-ups`):
+  - W: test-database guard only inspected DSN `host`/`hostaddr`; a host-less DSN, `service=`, or `PGHOST`/`PGHOSTADDR`/`PGSERVICE`/`PGSERVICEFILE` could redirect the destructive fixture. Now an explicit local host is required, `service` and those variables are rejected.
+  - S: vacuous statement-timeout echo test removed (the `pg_sleep` cancellation test is the proof).
+  - S: row mapper wrapper narrowed to `CatalogDataError`/`DomainError`; the domain wraps all value-level failures in `InvalidPricingInput`, and the mapper now also rejects a child price on a non-person unit. Tests added.
+  - S: CLI selects the injected repository with `is None`, not truthiness.
+- Still an owner task: `.env.example` wording (agents cannot read or edit it).
 
 ## Next step
 B4 (Excel import), A3, PRs.

@@ -75,6 +75,11 @@ def map_pricing_row(row: dict[str, Any]) -> CatalogEntry:
     if unit is None:
         raise _unknown_value("pricing item", row["id"], "unit", row["unit"], _UNITS)
     child = row["child_price_pen"]
+    if child is not None and unit is not PricingUnit.PER_PERSON:
+        raise CatalogDataError(
+            f"Cannot map pricing item '{row['id']}': child_price_pen is only valid "
+            f"for unit 'person', got unit {row['unit']!r}"
+        )
     item = CatalogItem(
         id=row["id"],
         name=row["name_en"],
@@ -157,7 +162,9 @@ def build_catalog_load(
 ) -> CatalogLoad:
     """Map rows one by one. Unmappable rows become error issues and are excluded.
 
-    Programming errors (for example a missing column) are not data errors and still raise.
+    Every value-level failure of one row is a ``CatalogDataError`` or a ``DomainError`` (the
+    domain wraps negative, blank and non-finite values in ``InvalidPricingInput``). Programming
+    errors (a missing column, a query/mapper type mismatch) are not data errors and still raise.
     """
     prices_by_item: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for price_row in price_rows:

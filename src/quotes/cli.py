@@ -52,7 +52,9 @@ def main(
     out = sys.stdout if out is None else out
     err = sys.stderr if err is None else err
     try:
-        repo = repository or PostgresCatalogRepository(database_url(env))
+        repo = (
+            repository if repository is not None else PostgresCatalogRepository(database_url(env))
+        )
         loaded = repo.load()
     except MissingSetting as exc:
         print(f"error: {exc}", file=err)
