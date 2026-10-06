@@ -1,7 +1,8 @@
 -- [vendored] Verbatim copy of db/migrations/2026-10-04-quotes-pricing-schema.sql
 -- [vendored] from the colcaStarTours repository (DDL applied to the shared Supabase database).
--- [vendored] Used only to build a throwaway test database; tests/infrastructure/test_schema_drift.py
--- [vendored] fails when this copy diverges from the source. Do not edit by hand: re-vendor it.
+-- [vendored] Used only to build a throwaway test database. tests/infrastructure/test_schema_drift.py
+-- [vendored] compares it with the source when COLCASTAR_REPO is set (checked locally; not enforced in CI).
+-- [vendored] Do not edit by hand: re-vendor it.
 -- 2026-10-04 — Internal quotes pricing schema (`quotes`)
 --
 -- WHY THIS FILE EXISTS

@@ -66,13 +66,17 @@ class LocalPaymentEntry:
         _require_text("English name", self.id, self.name_en)
 
 
-def _index[T](entries: Iterable[T], key: str, kind: str) -> dict[str, T]:
+class _HasId(Protocol):
+    @property
+    def id(self) -> str: ...
+
+
+def _index[T: _HasId](entries: Iterable[T], kind: str) -> dict[str, T]:
     indexed: dict[str, T] = {}
     for entry in entries:
-        entry_id = getattr(entry, key)
-        if entry_id in indexed:
-            raise DuplicateCatalogId(f"Duplicate {kind} id: {entry_id}")
-        indexed[entry_id] = entry
+        if entry.id in indexed:
+            raise DuplicateCatalogId(f"Duplicate {kind} id: {entry.id}")
+        indexed[entry.id] = entry
     return indexed
 
 
@@ -84,8 +88,8 @@ class Catalog:
         entries: Iterable[CatalogEntry] = (),
         local_payments: Iterable[LocalPaymentEntry] = (),
     ) -> None:
-        self._entries = _index(entries, "id", "pricing item")
-        self._local_payments = _index(local_payments, "id", "local payment")
+        self._entries = _index(entries, "pricing item")
+        self._local_payments = _index(local_payments, "local payment")
 
     def get_item(self, item_id: str) -> CatalogEntry:
         try:

@@ -62,9 +62,13 @@ def test_entry_rejects_non_positive_duration(days):
         entry(duration_days=days)
 
 
-def test_local_entry_rejects_blank_names():
+@pytest.mark.parametrize(
+    ("name_es", "name_en"),
+    [("", "Ticket"), ("Boleto", ""), ("  ", "Ticket"), ("Boleto", "   ")],
+)
+def test_local_entry_rejects_blank_names(name_es, name_en):
     with pytest.raises(InvalidPricingInput):
-        LocalPaymentEntry(id="x", info=local_entry().info, name_es="", name_en="Ticket")
+        LocalPaymentEntry(id="x", info=local_entry().info, name_es=name_es, name_en=name_en)
 
 
 def test_catalog_lookups():

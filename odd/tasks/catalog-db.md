@@ -42,7 +42,17 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
 - Generator loads `CatalogItem`/`LocalPaymentInfo` from Postgres; invalid rows reported, not crashing.
 
 ## Progress
-- Branches created: colcaStarTours `feat/quotes-pricing-schema` (worktree), Quotes-Tours `feat/catalog-01-db`.
+- colcaStarTours `feat/quotes-pricing-schema`: schema migration applied to Supabase (A1, A2); A3 pending.
+- Quotes-Tours `feat/catalog-01-db`: B1, B2 done and reviewed; advisory fixes (unit F) applied; B3 in progress; B4 pending.
+
+## Review log
+- B1–B2 (range main..41edbf1, 19 files, 874 lines): assess risk=high (shell in ci.yml), review due; consent granted by owner; 4 lenses (risk, resilience, readability, reliability) APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-13809761c345a5f6). Reviewed boundary advances to 41edbf1.
+- Advisory, non-blocking (candidates for follow-up, owner decides):
+  - W: integration fixture is destructive beyond the documented scope (prelude replaces `public.has_role`/`public.set_updated_at`, creates roles) with no guard on `TEST_DATABASE_URL`.
+  - W: one unmappable active row fails the whole `load()` (e.g. active local payment item with no prices yet); contradicts "reported, not crashing".
+  - W: drift test default path does not match README and never runs in CI.
+  - S: no connect/statement timeout; opaque unknown-unit message; `_index` getattr indirection; connection-failure test gated by DB skip; untested pricing-item mapping error and local-entry blank `name_en`; stale Progress/Next step in this doc.
+- Unit F (after 41edbf1): fixed the integration fixture guard (local hosts only, non-clobbering prelude), drift test honesty (COLCASTAR_REPO), connect/statement timeouts, explicit unknown-unit/visitor-category errors, typed `_index`, ungated connection-failure test, extra mapper and blank-name tests, stale Progress. The "one unmappable row fails `load()`" advisory is addressed by B3. Not done: `.env.example` wording (file edits denied by the sandbox).
 
 ## Next step
-Owner: set `quotes_generator` password; decide push + PR of colcaStarTours `feat/quotes-pricing-schema` → `develop`. Then A3 and B1–B4.
+B3 (`quotes catalog check`, invalid rows reported instead of crashing), then B4 (Excel import), A3, PRs.

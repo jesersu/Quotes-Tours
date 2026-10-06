@@ -27,16 +27,20 @@ python3 -m venv .venv
 The pricing catalog lives in the `quotes` schema of the shared Postgres (read-only access).
 
 - `DATABASE_URL`: read-only connection (see `.env.example`). Load it with `set -a; source .env; set +a`.
-- `TEST_DATABASE_URL`: scratch database for integration tests. They drop and recreate the
-  `quotes` schema there, so never use a real database.
+- `TEST_DATABASE_URL`: scratch database for integration tests. The tests refuse to run unless
+  its host is local (`localhost`, `127.0.0.1`, `::1` or a unix socket); there is no override.
+  Its fixture drops and recreates the `quotes` schema and creates the roles `anon` and
+  `authenticated`, `public.app_role`, `public.set_updated_at` and `public.has_role` only when
+  they do not already exist (existing objects are never replaced).
 
 ```bash
-createdb quotes_test   # any scratch Postgres 14+
+createdb quotes_test   # any local scratch Postgres 14+
 TEST_DATABASE_URL=postgresql://localhost/quotes_test .venv/bin/pytest
 ```
 
 Without `TEST_DATABASE_URL` the integration tests are skipped. `tests/sql/quotes_schema.sql` is a
-vendored copy of the colcaStarTours migration; a drift test compares it when that repository is
-found next to this one (or at `COLCASTAR_REPO`).
+vendored copy of the colcaStarTours migration. The drift test compares it only when
+`COLCASTAR_REPO` points at a colcaStarTours checkout (checked locally; not enforced in CI); if the
+variable is set but the migration file is missing, the test fails.
 
 Business data (price spreadsheets) is never committed; this repository is public.

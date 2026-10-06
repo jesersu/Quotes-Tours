@@ -1,6 +1,8 @@
 """Integration tests against a real Postgres. Set TEST_DATABASE_URL to run them.
 
-WARNING: the fixture drops and recreates the ``quotes`` schema in that database.
+The fixture refuses to run unless the target host is local (see tests/support/db_guard.py).
+It drops and recreates the ``quotes`` schema and, only if missing, creates stand-ins for the
+Supabase roles, ``public.app_role``, ``public.set_updated_at`` and ``public.has_role``.
 """
 
 import os
@@ -15,6 +17,7 @@ from quotes.domain.catalog import PricingUnit
 from quotes.domain.local_payment import VisitorCategory
 from quotes.domain.money import Currency
 from quotes.infrastructure.postgres_catalog import CatalogDataError, PostgresCatalogRepository
+from tests.support.db_guard import assert_local_database
 
 pytestmark = [
     pytest.mark.integration,
@@ -27,6 +30,7 @@ SQL_DIR = Path(__file__).resolve().parents[1] / "sql"
 @pytest.fixture
 def dsn():
     url = os.environ["TEST_DATABASE_URL"]
+    assert_local_database(url)  # fails loudly: the fixture is destructive
     with psycopg.connect(url, autocommit=True) as conn:
         conn.execute("drop schema if exists quotes cascade")
         conn.execute((SQL_DIR / "supabase_prelude.sql").read_text())
@@ -153,6 +157,16 @@ def test_unmappable_local_payment_names_the_row(run, dsn):
         PostgresCatalogRepository(dsn).load()
 
 
-def test_connection_failure_is_not_swallowed():
-    with pytest.raises(psycopg.OperationalError):
-        PostgresCatalogRepository("postgresql://nobody@127.0.0.1:1/none?connect_timeout=1").load()
+def test_statement_timeout_is_applied_to_the_session(dsn):
+    repo = PostgresCatalogRepository(dsn, statement_timeout_ms=4321)
+    assert repo.load().items() == ()
+    with psycopg.connect(dsn, options="-c statement_timeout=4321") as conn:
+        assert conn.execute("show statement_timeout").fetchone() == ("4321ms",)
+
+
+def test_slow_statement_is_cancelled_by_the_timeout(dsn, monkeypatch):
+    import quotes.infrastructure.postgres_catalog as adapter
+
+    monkeypatch.setattr(adapter, "_ITEMS_SQL", "select pg_sleep(2)")
+    with pytest.raises(psycopg.errors.QueryCanceled):
+        PostgresCatalogRepository(dsn, statement_timeout_ms=100).load()
