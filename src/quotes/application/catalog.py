@@ -1,0 +1,175 @@
+"""Catalog read model and the port used to load it.
+
+Domain objects stay minimal (price, unit, one display name). The catalog entries here wrap
+them with the extra data the planner and renderer need: category, bilingual names, duration.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Literal, Protocol
+
+from quotes.domain.catalog import CatalogItem
+from quotes.domain.errors import DomainError, InvalidPricingInput
+from quotes.domain.local_payment import LocalPaymentInfo, VisitorCategory
+
+
+class CatalogItemNotFound(DomainError):
+    """Raised when a pricing item id is not in the catalog."""
+
+
+class LocalPaymentNotFound(DomainError):
+    """Raised when a paid-locally item id is not in the catalog."""
+
+
+class DuplicateCatalogId(DomainError):
+    """Raised when a catalog is built with a repeated id."""
+
+
+def _require_text(label: str, owner_id: str, value: str) -> None:
+    if not value.strip():
+        raise InvalidPricingInput(f"{label} must not be empty: {owner_id}")
+
+
+@dataclass(frozen=True)
+class CatalogEntry:
+    item: CatalogItem
+    category: str
+    name_es: str
+    name_en: str
+    duration_days: int | None = None
+    notes: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_text("Category", self.item.id, self.category)
+        _require_text("Spanish name", self.item.id, self.name_es)
+        _require_text("English name", self.item.id, self.name_en)
+        if self.duration_days is not None and self.duration_days < 1:
+            raise InvalidPricingInput(f"Duration must be at least 1 day: {self.item.id}")
+
+    @property
+    def id(self) -> str:
+        return self.item.id
+
+
+@dataclass(frozen=True)
+class LocalPaymentEntry:
+    id: str
+    info: LocalPaymentInfo
+    name_es: str
+    name_en: str
+    notes: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_text("Spanish name", self.id, self.name_es)
+        _require_text("English name", self.id, self.name_en)
+
+
+class _HasId(Protocol):
+    @property
+    def id(self) -> str: ...
+
+
+def _index[T: _HasId](entries: Iterable[T], kind: str) -> dict[str, T]:
+    indexed: dict[str, T] = {}
+    for entry in entries:
+        if entry.id in indexed:
+            raise DuplicateCatalogId(f"Duplicate {kind} id: {entry.id}")
+        indexed[entry.id] = entry
+    return indexed
+
+
+class Catalog:
+    """Immutable-by-convention lookup of pricing entries and paid-locally entries by id."""
+
+    def __init__(
+        self,
+        entries: Iterable[CatalogEntry] = (),
+        local_payments: Iterable[LocalPaymentEntry] = (),
+    ) -> None:
+        self._entries = _index(entries, "pricing item")
+        self._local_payments = _index(local_payments, "local payment")
+
+    def get_item(self, item_id: str) -> CatalogEntry:
+        try:
+            return self._entries[item_id]
+        except KeyError:
+            raise CatalogItemNotFound(f"Unknown catalog item: {item_id}") from None
+
+    def items(self) -> tuple[CatalogEntry, ...]:
+        return tuple(self._entries.values())
+
+    def local_payment(self, item_id: str) -> LocalPaymentEntry:
+        try:
+            return self._local_payments[item_id]
+        except KeyError:
+            raise LocalPaymentNotFound(f"Unknown local payment item: {item_id}") from None
+
+    def local_payments(self) -> tuple[LocalPaymentEntry, ...]:
+        return tuple(self._local_payments.values())
+
+
+Severity = Literal["error", "warning"]
+
+
+@dataclass(frozen=True)
+class CatalogIssue:
+    """A problem found while loading the catalog. Errors exclude the row; warnings keep it."""
+
+    severity: Severity
+    code: str
+    subject_id: str
+    message: str
+
+    def __post_init__(self) -> None:
+        if self.severity not in ("error", "warning"):
+            raise ValueError(f"Unknown issue severity: {self.severity!r}")
+
+
+@dataclass(frozen=True)
+class CatalogLoad:
+    """The valid catalog plus everything that was reported (or excluded) while loading it."""
+
+    catalog: Catalog
+    issues: tuple[CatalogIssue, ...] = ()
+
+    @property
+    def errors(self) -> tuple[CatalogIssue, ...]:
+        return tuple(i for i in self.issues if i.severity == "error")
+
+    @property
+    def warnings(self) -> tuple[CatalogIssue, ...]:
+        return tuple(i for i in self.issues if i.severity == "warning")
+
+    @property
+    def ok(self) -> bool:
+        return not self.errors
+
+
+def audit_catalog(catalog: Catalog) -> tuple[CatalogIssue, ...]:
+    """Warnings about a catalog that is valid but looks incomplete."""
+    issues: list[CatalogIssue] = []
+    if not catalog.items():
+        issues.append(
+            CatalogIssue("warning", "empty_catalog", "catalog", "No active pricing items found")
+        )
+    for local in catalog.local_payments():
+        present = {p.category for p in local.info.prices}
+        missing = [c.value for c in VisitorCategory if c not in present]
+        if missing:
+            issues.append(
+                CatalogIssue(
+                    "warning",
+                    "missing_visitor_category",
+                    local.id,
+                    f"No price for visitor category: {', '.join(missing)}",
+                )
+            )
+    return tuple(issues)
+
+
+class CatalogRepository(Protocol):
+    def load(self) -> CatalogLoad:
+        """Return the active catalog; unusable rows are reported as issues, not raised."""
+        ...
