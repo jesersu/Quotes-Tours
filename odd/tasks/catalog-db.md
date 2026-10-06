@@ -67,6 +67,12 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
   - W: excel reader quantizes before the max-price check → InvalidOperation traceback on huge cell values.
   - S: slug check uses `$` (accepts trailing newline); unknown draft keys silently ignored; lazy sheet-read errors not wrapped; `--force` write not atomic and file mode untested.
 - Follow-up commit `fix(catalog): harden draft and SQL export against bad input` fixes the seven advisories of lineage review-0ea61c16e08e3508: deterministic CLI price-absence assertions with synthetic prices, `validate_draft` now rejects everything the SQL renderer refuses (shared rules), huge/invalid spreadsheet prices are skipped instead of crashing, slugs use `fullmatch`, unknown draft keys are reported, lazy sheet-read failures become `SheetError`, and output files are written atomically with mode 0o600.
+- e0f51e9 (range 3579f06..e0f51e9, 15 files, 507 lines): assess medium (slice_budget_reached); consent granted by owner; reliability lens APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-74fc910576eb083d). Reviewed boundary advances to e0f51e9. Advisory, non-blocking, checked by the parent:
+  - W `os.link` fails on filesystems without hard links (FAT/exFAT, some mounts) → traceback on the no-force path. Real but not reachable on the owner's APFS disk. DEFERRED.
+  - W NaN/inf cell test doubted by the reviewer → REFUTED: `tests/infrastructure/test_excel_price_sheet.py` passes (15 tests).
+  - W no automated round trip of real `draft` output through `validate_draft` → REFUTED in practice: the owner's generated draft yields only `needs_review` (31) and null ticket prices (2), no unknown-key problems. A pinned test is still missing. DEFERRED.
+  - S reader `except` region broad / message carries only the exception type; `without_path_lines` drops whole lines. DEFERRED.
+  Owner agreed to stop polishing this branch after this round; deferred items are candidates for a later small commit.
 
 ## Next step
 Owner reviews `data/private/catalog-draft.yaml` → `quotes catalog sql` → paste in the Supabase SQL Editor → `quotes catalog check`; then A3 and PRs.
