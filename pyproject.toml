@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Bilingual (EN/ES) tour itinerary quote generator for Colca Star Tours"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["psycopg[binary]>=3.2"]
+dependencies = ["psycopg[binary]>=3.2", "openpyxl>=3.1", "PyYAML>=6"]
 
 [project.scripts]
 quotes = "quotes.cli:main"
