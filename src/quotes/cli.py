@@ -12,7 +12,8 @@ import psycopg
 
 from quotes.application.catalog import CatalogLoad, CatalogRepository
 from quotes.application.catalog_proposal import propose_catalog
-from quotes.infrastructure.catalog_draft import dump_draft
+from quotes.infrastructure.catalog_draft import dump_draft, load_draft, validate_draft
+from quotes.infrastructure.catalog_sql import render_sql
 from quotes.infrastructure.excel_price_sheet import DEFAULT_SHEET, SheetError, read_price_rows
 from quotes.infrastructure.output_file import OutputExists, write_new_file
 from quotes.infrastructure.postgres_catalog import PostgresCatalogRepository
@@ -22,6 +23,7 @@ EXIT_OK = 0
 EXIT_CATALOG_ERRORS = 1
 EXIT_UNAVAILABLE = 2  # configuration, connection or file problem
 DEFAULT_DRAFT = Path("data/private/catalog-draft.yaml")
+DEFAULT_SQL = Path("data/private/catalog-import.sql")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -37,6 +39,12 @@ def _parser() -> argparse.ArgumentParser:
     draft.add_argument("--sheet", default=DEFAULT_SHEET)
     draft.add_argument("-o", "--output", type=Path, default=DEFAULT_DRAFT)
     draft.add_argument("--force", action="store_true", help="overwrite an existing output file")
+    sql = catalog_commands.add_parser(
+        "sql", help="turn a reviewed draft into an idempotent SQL script for the SQL Editor"
+    )
+    sql.add_argument("draft", type=Path)
+    sql.add_argument("-o", "--output", type=Path, default=DEFAULT_SQL)
+    sql.add_argument("--force", action="store_true", help="overwrite an existing output file")
     return parser
 
 
@@ -74,6 +82,44 @@ def _draft(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     return EXIT_OK
 
 
+def _sql(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    try:
+        text = args.draft.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        print(f"error: draft not found: {args.draft}", file=err)
+        return EXIT_UNAVAILABLE
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"error: cannot read {args.draft} ({type(exc).__name__})", file=err)
+        return EXIT_UNAVAILABLE
+    try:
+        draft = validate_draft(load_draft(text))
+    except ValueError as exc:
+        print(f"error: {exc}", file=err)
+        return EXIT_UNAVAILABLE
+    if draft.problems:
+        print(f"Draft is not ready ({len(draft.problems)} problems); no SQL written:", file=err)
+        for problem in draft.problems:
+            print(f"  - {problem}", file=err)
+        return EXIT_CATALOG_ERRORS
+    try:
+        write_new_file(args.output, render_sql(draft), force=args.force)
+    except OutputExists as exc:
+        print(f"error: {exc}", file=err)
+        return EXIT_UNAVAILABLE
+    except OSError as exc:
+        print(f"error: cannot write {args.output} ({type(exc).__name__})", file=err)
+        return EXIT_UNAVAILABLE
+    print("Catalog SQL", file=out)
+    print(f"  pricing items: {len(draft.item_rows)}", file=out)
+    print(f"  local payment items: {len(draft.local_rows)}", file=out)
+    print(f"  local payment prices: {len(draft.price_rows)}", file=out)
+    for warning in draft.warnings:
+        print(f"warning {warning}", file=out)
+    print(f"  written to: {args.output}", file=out)
+    print("Paste it into the Supabase SQL Editor, then run `quotes catalog check`.", file=out)
+    return EXIT_OK
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -87,6 +133,8 @@ def main(
     err = sys.stderr if err is None else err
     if args.catalog_command == "draft":
         return _draft(args, out, err)
+    if args.catalog_command == "sql":
+        return _sql(args, out, err)
     assert args.catalog_command == "check"
     try:
         repo = (

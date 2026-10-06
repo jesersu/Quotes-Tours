@@ -34,7 +34,8 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
 - [x] B1 — `CatalogRepository` port + in-memory catalog. Route: delegated writer. Evidence: RED (ModuleNotFoundError quotes.application.catalog) then GREEN 105 passed; ruff format/check clean. `CatalogEntry`/`LocalPaymentEntry` wrap domain objects with bilingual names, category, duration, notes; domain untouched.
 - [x] B2 — Postgres adapter + integration tests (CI service, `TEST_DATABASE_URL`, vendored quotes DDL + drift check). Route: delegated writer. Evidence: RED (ModuleNotFoundError settings/postgres_catalog) then GREEN against throwaway local Postgres 14: 122 passed + 1 skipped (drift, source absent); with COLCASTAR_REPO set: 123 passed; TEST_DATABASE_URL unset: 110 passed, 13 skipped. Migration runs unchanged on PG14. CI postgres:16 service added (not yet run in CI).
 - [x] B3 — `quotes catalog check` + degrade instead of crash. Route: delegated writer. Evidence: RED (collection errors: missing CatalogLoad/audit_catalog/quotes.cli/build_catalog_load) then GREEN against throwaway local Postgres 14: 179 passed, 1 skipped (drift). Port is now `load() -> CatalogLoad(catalog, issues)`; bad rows become error issues and are excluded. Console script run: clean data exit 0; active local payment item without prices exit 1 with the issue listed; missing DATABASE_URL exit 2.
-- [ ] B4 — Excel → reviewed draft (`data/private/`) → `quotes catalog import`. Route: delegated writer.
+- [x] B4 (code) — `quotes catalog draft <xlsx>` (Excel → reviewable YAML under `data/private/`) and `quotes catalog sql <draft>` (reviewed draft → idempotent upsert SQL for the Supabase SQL Editor; validation reuses `build_catalog_load`). Route: delegated writer. Evidence: RED (ModuleNotFoundError for the new modules, twice) then GREEN against throwaway local Postgres 14: 276 passed, 1 skipped (drift); the integration test executes the generated SQL, loads it through `PostgresCatalogRepository`, re-runs it (idempotent) and applies a modified draft (upsert updates). Without `TEST_DATABASE_URL` the DB tests skip. Tested with synthetic workbooks only; the real workbook was not opened.
+- [ ] B4 (owner steps) — run `quotes catalog draft` on the real workbook, review `data/private/catalog-draft.yaml`, run `quotes catalog sql`, paste the SQL in the Supabase SQL Editor, run `quotes catalog check`.
 
 ## Acceptance criteria
 - anon/authenticated have no USAGE on schema `quotes`; RLS enabled on all `quotes` tables; `quotes_generator` can only SELECT pricing tables.
@@ -43,7 +44,7 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
 
 ## Progress
 - colcaStarTours `feat/quotes-pricing-schema`: schema migration applied to Supabase (A1, A2); A3 pending.
-- Quotes-Tours `feat/catalog-01-db`: B1, B2 done and reviewed; advisory fixes (unit F) applied; B3 done; B4 pending.
+- Quotes-Tours `feat/catalog-01-db`: B1, B2 done and reviewed; advisory fixes (unit F) applied; B3 done; B4 code done, owner import steps pending.
 
 ## Review log
 - B1–B2 (range main..41edbf1, 19 files, 874 lines): assess risk=high (shell in ci.yml), review due; consent granted by owner; 4 lenses (risk, resilience, readability, reliability) APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-13809761c345a5f6). Reviewed boundary advances to 41edbf1.
@@ -62,4 +63,4 @@ Move the pricing catalog from the owner's Excel into the shared Supabase Postgre
 - Still an owner task: `.env.example` wording (agents cannot read or edit it).
 
 ## Next step
-B4 (Excel import), A3, PRs.
+B4 owner steps (draft → review → sql → SQL Editor → `quotes catalog check`), A3, PRs.

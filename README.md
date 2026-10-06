@@ -60,4 +60,40 @@ missing a visitor category and an empty catalog are warnings. Exit codes: `0` no
 (warnings allowed), `1` at least one error, `2` configuration or connection failure (the message
 never includes the connection string).
 
+## Loading prices from the spreadsheet
+
+Everything under `data/private/` (and every `*.xlsx`) is git-ignored: prices never reach this public
+repository. No write credential is needed; the owner pastes the generated SQL into the Supabase SQL
+Editor.
+
+1. **Draft.** Propose entries from the sheet (default sheet `PRECIOS GENERAL`, header on `NOMBRE` /
+   `PRECIO`):
+
+   ```bash
+   .venv/bin/quotes catalog draft path/to/prices.xlsx            # -> data/private/catalog-draft.yaml
+   # options: --sheet "PRECIOS GENERAL"  -o <file>  --force
+   ```
+
+   The command prints counts and the output path only (never prices) and refuses to overwrite an
+   existing file without `--force`. The heuristics (category, unit, duration, English name, the
+   Colca tourist ticket as a paid-locally item) are documented in
+   `src/quotes/application/catalog_proposal.py`.
+2. **Review.** Open the YAML, fix every entry (unit, English name, child price, the two missing
+   visitor-category prices of the local payment), then set `needs_review: false` on each one.
+3. **SQL.** Generate the import script; it refuses while any entry still needs review, a local
+   price is null, or a value is invalid, and lists the reasons:
+
+   ```bash
+   .venv/bin/quotes catalog sql data/private/catalog-draft.yaml  # -> data/private/catalog-import.sql
+   ```
+
+   The script is one `begin; ... commit;` of upserts (re-running it is safe; no deletes, no DDL)
+   with a commented verification query at the end.
+4. **Apply and check.** Paste the script into the Supabase SQL Editor and run it, then:
+
+   ```bash
+   set -a; source .env; set +a
+   .venv/bin/quotes catalog check
+   ```
+
 Business data (price spreadsheets) is never committed; this repository is public.
