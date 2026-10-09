@@ -1,0 +1,321 @@
+% =====================================================================
+%  Brand style shared by every quote and proposal: packages, colours,
+%  layout and reusable section blocks.
+%
+%  This file holds NO company data. Names, tax id, phones, address and
+%  image file names come from a separate company file that must be
+%  loaded first (see company.example.tex).
+%
+%  Usage, from a document:
+%
+%      \documentclass[11pt,a4paper]{article}
+%      \newif\ifdraft
+%      \drafttrue                      % optional; the default is final
+%      \newcommand{\CoLang}{en}        % optional; the default is Spanish
+%      \newcommand{\CoAssetsDir}{/path/to/branding/assets/}
+%      \input{/path/to/company}
+%      \input{/path/to/colcastar_style}
+%      \begin{document}
+%      \letterhead
+%      ...
+%
+%  \ifdraft, \CoLang and \CoAssetsDir must be set BEFORE this file is
+%  loaded, because \TODO, the language and the image paths depend on them.
+% =====================================================================
+
+\ifdefined\CoLegalName\else
+  \errmessage{Load the company data file before colcastar_style.tex}
+\fi
+
+% =====================================================================
+%  1. Packages
+% =====================================================================
+% Language. The text is compared, not the meaning: \newcommand makes
+% macros \long, and an \ifx against a plain \def never matches.
+\usepackage{etoolbox}
+\providecommand{\CoLang}{es}
+\newif\ifcoEnglish
+\ifdefstring{\CoLang}{en}{\coEnglishtrue}{\coEnglishfalse}
+
+% A document that does not declare the draft switch is a final version.
+\ifcsname ifdraft\endcsname\else
+  \expandafter\newif\csname ifdraft\endcsname
+\fi
+
+% Fonts. pdfLaTeX uses the classic Helvetica clone; XeTeX and LuaTeX
+% (tectonic) need a Unicode font, or characters such as the inverted
+% question mark land on the wrong glyph.
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage[scaled=0.95]{helvet}
+\else
+  \usepackage{fontspec}
+  \setsansfont{texgyreheros}[
+    Extension=.otf,
+    UprightFont=*-regular,
+    BoldFont=*-bold,
+    ItalicFont=*-italic,
+    BoldItalicFont=*-bolditalic,
+    Scale=0.95]
+\fi
+\ifcoEnglish
+  \usepackage[english]{babel}
+\else
+  \usepackage[spanish,es-noshorthands]{babel}
+\fi
+\renewcommand{\familydefault}{\sfdefault}
+
+\usepackage[a4paper,top=2cm,bottom=2.2cm,left=2cm,right=2cm]{geometry}
+\usepackage[table]{xcolor}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage[hidelinks]{hyperref}
+\usepackage{needspace}
+
+% Company images live in one folder. \CoAssetsDir is the path to it as
+% seen from the document. A local assets/ folder is searched first, for
+% images that belong to one document and are not brand material.
+\providecommand{\CoAssetsDir}{../branding/assets/}
+\edef\CoGraphicsPath{\noexpand\graphicspath{{assets/}{\CoAssetsDir}}}
+\CoGraphicsPath
+
+% =====================================================================
+%  2. Brand colours
+% =====================================================================
+\definecolor{brandnavy}{HTML}{0F172A}
+\definecolor{brandgold}{HTML}{F59E0B}
+\definecolor{brandslate}{HTML}{475569}
+\definecolor{brandmist}{HTML}{F1F5F9}
+\definecolor{brandline}{HTML}{CBD5E1}
+\definecolor{todomark}{HTML}{C2410C}
+
+\hypersetup{
+  colorlinks=true, urlcolor=brandnavy, linkcolor=brandnavy,
+  pdfauthor={\CoLegalName}
+}
+
+% =====================================================================
+%  3. Draft marks
+% =====================================================================
+\ifdraft
+  \newcommand{\TODO}[1]{{\leavevmode\bfseries\color{todomark}[#1]}}
+\else
+  \newcommand{\TODO}[1]{[#1]}
+\fi
+
+% =====================================================================
+%  4. Layout
+%  ---------------------------------------------------------------------
+%  A p-column cell whose content starts with \color begins its vertical
+%  list with a whatsit, the \vtop gets zero height and the content drops
+%  below the row baseline. \leavevmode forces a first box and realigns.
+%  It goes before every \color that opens a cell.
+% =====================================================================
+\setlength{\arrayrulewidth}{0.4pt}
+\renewcommand{\arraystretch}{1.3}
+\arrayrulecolor{brandline}
+
+\titleformat{\section}
+  {\color{brandnavy}\normalfont\large\bfseries}
+  {}{0pt}{}[\vspace{-0.55em}\color{brandgold}\rule{\linewidth}{2pt}]
+\titlespacing*{\section}{0pt}{1.5em}{0.7em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\fancyfoot[L]{\footnotesize\color{brandslate}\CoLegalName\quad RUC \CoRuc}
+\fancyfoot[R]{\footnotesize\color{brandslate}\ifcoEnglish Page\else Página\fi\ \thepage}
+
+% An image that does not break the build when the file is missing.
+% Pass ONLY the file name. It looks in the document's own assets/ first
+% and then in \CoAssetsDir. \IfFileExists does NOT honour \graphicspath,
+% so the paths are tried by hand.
+\newcommand{\safeimg}[2]{%
+  \IfFileExists{assets/#1}%
+    {\includegraphics[height=#2,keepaspectratio]{assets/#1}}%
+    {\IfFileExists{\CoAssetsDir#1}%
+      {\includegraphics[height=#2,keepaspectratio]{\CoAssetsDir#1}}%
+      {\fbox{\parbox[c][#2][c]{4cm}{\centering\footnotesize\color{brandslate}missing image:\\\coverbatim{#1}}}}}}
+
+% Prints a file name or path literally. Names with an underscore or another
+% TeX-special character would otherwise break the build in text mode.
+\newcommand{\coverbatim}[1]{\texttt{\expandafter\detokenize\expandafter{#1}}}
+
+% Runs #2 when image #1 is found where \safeimg and \cologo look for it
+% (the document's own assets/ first, then \CoAssetsDir), and #3 otherwise.
+\newcommand{\coimgstatus}[3]{%
+  \IfFileExists{assets/#1}{#2}{\IfFileExists{\CoAssetsDir#1}{#2}{#3}}}
+
+% The logo, with the same fallback, sized by width for the letterhead.
+\newcommand{\cologo}{%
+  \IfFileExists{assets/\CoLogoFile}%
+    {\includegraphics[width=3.1cm]{assets/\CoLogoFile}}%
+    {\IfFileExists{\CoAssetsDir\CoLogoFile}%
+      {\includegraphics[width=3.1cm]{\CoAssetsDir\CoLogoFile}}%
+      {\fbox{\parbox[c][1.6cm][c]{2.7cm}{\centering\footnotesize\color{brandslate}logo}}}}}
+
+% Letterhead. Called once, right after the document opens.
+\newcommand{\letterhead}{%
+  \noindent
+  \begin{tabularx}{\linewidth}{@{}p{3.2cm}X@{}}
+    \raisebox{-0.35\height}{\cologo} &
+    \raggedleft
+    {\Large\bfseries\color{brandnavy}\CoName}\\[0.15em]
+    {\footnotesize\color{brandslate}\CoLegalName\ --- RUC \CoRuc}\\
+    {\footnotesize\color{brandslate}\CoCity}\\
+    {\footnotesize\color{brandslate}\href{mailto:\CoEmail}{\CoEmail} \textbullet\ \CoPhone}\\
+    {\footnotesize\color{brandslate}\href{\CoWebUrl}{\CoWeb}}
+  \end{tabularx}
+  \par\vspace{0.6em}
+  {\color{brandgold}\rule{\linewidth}{3pt}}\par}
+
+% Closing signature.
+\newcommand{\signature}[1]{%
+  \par\vspace{1.1em}\noindent
+  \ifcoEnglish Kind regards,\else Un cordial saludo,\fi\\[0.6em]
+  {\bfseries\color{brandnavy}#1}\\
+  {\footnotesize\color{brandslate}\CoLegalName}\\
+  {\footnotesize\color{brandslate}\href{mailto:\CoEmail}{\CoEmail} \textbullet\ \CoPhone\ \textbullet\ \href{\CoWebUrl}{\CoWeb}}\par}
+
+% Section title. The optional argument is how many lines must be free at
+% the bottom of the page before starting, so the title is not orphaned.
+% Raise it when what follows is a block that cannot be split.
+\newcommand{\sect}[2][6]{\Needspace*{#1\baselineskip}\section*{#2}}
+
+% Day header inside an itinerary.
+\newcommand{\dayhead}[2]{%
+  \par\vspace{1.0em}\noindent
+  \begin{tabularx}{\linewidth}{@{}>{\columncolor{brandnavy}}p{3.3cm}>{\columncolor{brandmist}}X@{}}
+    \leavevmode\color{white}\bfseries #1 & \leavevmode\color{brandnavy}\bfseries #2 \\
+  \end{tabularx}\par\vspace{0.45em}}
+
+% Option header, when a proposal offers more than one programme.
+\newcommand{\opthead}[2]{%
+  \par\vspace{1.1em}\noindent
+  \begin{tabularx}{\linewidth}{@{}>{\columncolor{brandgold}}p{3.3cm}>{\columncolor{brandnavy}}X@{}}
+    \leavevmode\color{brandnavy}\bfseries #1 & \leavevmode\color{white}\bfseries #2 \\
+  \end{tabularx}\par\vspace{0.5em}}
+
+% Day footer: meals and accommodation.
+\newcommand{\daymeta}[2]{%
+  \par\vspace{0.2em}%
+  {\footnotesize\color{brandslate}%
+  \textbf{\ifcoEnglish Meals:\else Comidas:\fi} #1 \quad\textbullet\quad
+  \textbf{\ifcoEnglish Accommodation:\else Alojamiento:\fi} #2}\par}
+
+% Highlighted note, with the gold bar at the side.
+\newcommand{\notebox}[1]{%
+  \par\vspace{0.5em}\noindent
+  \textcolor{brandgold}{\rule{2pt}{\dimexpr\baselineskip\relax}}\hspace{0.5em}%
+  \begin{minipage}{\dimexpr\linewidth-1.2em\relax}
+    {\footnotesize #1}
+  \end{minipage}\par\vspace{0.3em}}
+
+% =====================================================================
+%  5. Reusable section blocks
+%  ---------------------------------------------------------------------
+%  These sections are the same in every proposal because they describe
+%  the company, not the client. They update themselves when the company
+%  file changes.
+% =====================================================================
+
+% Diagnostics: prints where the paths resolved and whether each image is
+% found. Put it on a draft page when an image does not show up.
+\newcommand{\brandingdiag}{%
+  \par{\footnotesize\color{brandslate}
+  \textbf{Resolved paths.}   Image folder: \coverbatim{\CoAssetsDir}\\
+  \coimgstatus{\CoLogoFile}{Logo: found}{\textbf{Logo: NOT found}}\\
+  \coimgstatus{\CoConstanciaFile}{Certificate: found}{\textbf{Certificate: NOT found}}\\
+  \coimgstatus{\CoVehicleFileA}{Vehicle photo A: found}{\textbf{Vehicle photo A: NOT found}}\\
+  \coimgstatus{\CoVehicleFileB}{Vehicle photo B: found}{\textbf{Vehicle photo B: NOT found}}
+  \par}}
+
+% --- Your vehicle, driver and guide -----------------------------------
+% #1 = the "for your group" line, which depends on the client.
+% #2 = the guide line, which changes with the language and the days.
+\newcommand{\vehicletable}[2]{%
+  \noindent\makebox[\linewidth][c]{%
+    \safeimg{\CoVehicleFileA}{5.0cm}\hspace{0.7em}%
+    \safeimg{\CoVehicleFileB}{5.0cm}}
+  \par\vspace{0.7em}\noindent
+  \begin{tabularx}{\linewidth}{@{}>{\leavevmode\bfseries\color{brandnavy}}l@{\hspace{1.4em}}>{\raggedright\arraybackslash}X@{}}
+    \ifcoEnglish Vehicle\else Vehículo\fi & \ifcoEnglish\CoVehicleEn\else\CoVehicle\fi \\
+    \ifcoEnglish For your group\else Para su grupo\fi & #1 \\
+    \ifcoEnglish Permits\else Permisos\fi & \ifcoEnglish\CoVehiclePermitEn\else\CoVehiclePermit\fi \\
+    \ifcoEnglish Driver\else Conductor\fi &
+      \ifcoEnglish Extensive experience on the Colca routes, with local knowledge of the valley%
+      \else Amplia experiencia en las rutas del Colca, con conocimiento local del valle\fi \\
+    \ifcoEnglish Guide\else Guía\fi & #2 \\
+  \end{tabularx}\par}
+
+% --- Our credentials ---------------------------------------------------
+% No arguments: everything comes from the company file.
+\newcommand{\credentials}{%
+  \noindent
+  \begin{minipage}[t]{6.4cm}
+    \vspace{0pt}%
+    \safeimg{\CoConstanciaFile}{7.6cm}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{\dimexpr\linewidth-6.9cm\relax}
+    \vspace{0pt}%
+    \raggedright
+    \ifcoEnglish
+      We are a travel agency and tour operator formally registered with the
+      \textbf{Regional Government of Arequipa}, through its Regional Board of Foreign
+      Trade and Tourism (GRCET).
+
+      \vspace{0.5em}
+      The certificate shown here is our operating licence. It certifies that
+      \textbf{\CoLegalName}, RUC \CoRuc, has met the requirements of Supreme Decree
+      N.\textordmasculine{} 026-2004-MINCETUR and is classified as a
+      \textbf{Tour Operator}.
+
+      \vspace{0.5em}
+      {\footnotesize\color{brandslate}\CoConstancia, \CoConstanciaFechaEn.}
+    \else
+      Somos una agencia de viajes y operador de turismo formalmente registrada ante el
+      \textbf{Gobierno Regional de Arequipa}, a través de su Gerencia Regional de Comercio
+      Exterior y Turismo (GRCET).
+
+      \vspace{0.5em}
+      La constancia que acompaña a este texto es nuestra autorización de funcionamiento.
+      Acredita que \textbf{\CoLegalName}, RUC \CoRuc, ha cumplido con los requisitos del
+      Decreto Supremo N.\textordmasculine{} 026-2004-MINCETUR y está clasificada como
+      \textbf{Operador de Turismo}.
+
+      \vspace{0.5em}
+      {\footnotesize\color{brandslate}\CoConstancia, \CoConstanciaFecha.}
+    \fi
+  \end{minipage}
+  \par\vspace{0.8em}\noindent
+  \begin{tabularx}{\linewidth}{@{}>{\leavevmode\bfseries\color{brandnavy}}l@{\hspace{1.4em}}>{\raggedright\arraybackslash}X@{}}
+    \ifcoEnglish Registered name\else Razón social\fi & \CoLegalName \\
+    \ifcoEnglish Trading name\else Nombre comercial\fi & \CoTradeName \\
+    RUC & \CoRuc \\
+    \ifcoEnglish Activity\else Actividad\fi & \ifcoEnglish\CoCiiuEn\else\CoCiiu\fi \\
+    \ifcoEnglish Registered address\else Domicilio fiscal\fi & \CoAddress \\
+    \ifcoEnglish Founder\else Fundador\fi & \ifcoEnglish\CoFounderEn\else\CoFounder\fi \\
+  \end{tabularx}\par}
+
+% --- To confirm ---------------------------------------------------------
+% #1 = what we need the client to answer. It depends on the message they
+%      sent, so the quote passes it in.
+\newcommand{\confirmblock}[1]{%
+  \noindent #1
+  \par\vspace{0.6em}\noindent
+  \begin{tabularx}{\linewidth}{@{}>{\leavevmode\bfseries\color{brandnavy}}l@{\hspace{1.4em}}>{\raggedright\arraybackslash}X@{}}
+    WhatsApp & \CoWhatsApp\ \ifcoEnglish(official)\else(oficial)\fi \\
+    \ifcoEnglish Emergencies\else Emergencias\fi & \CoEmergency \\
+    \ifcoEnglish Email\else Correo\fi & \href{mailto:\CoEmail}{\CoEmail} \\
+    \ifcoEnglish Website\else Web\fi & \href{\CoWebUrl}{\CoWeb} \\
+    \ifcoEnglish Payment\else Pago\fi & \ifcoEnglish\CoPaymentEn\else\CoPayment\fi \\
+  \end{tabularx}\par}
