@@ -97,3 +97,20 @@ Editor.
    ```
 
 Business data (price spreadsheets) is never committed; this repository is public.
+
+## Branding for LaTeX output
+
+The brand style is split in two so that company identity stays out of this repository:
+
+- `src/quotes/infrastructure/latex/colcastar_style.tex` (public): packages, colours, layout and the
+  reusable blocks (`\letterhead`, `\dayhead`, `\vehicletable`, `\credentials`, ...). It defines no
+  company data. Spanish is the default; `\newcommand{\CoLang}{en}` before loading it switches the
+  fixed texts to English.
+- `src/quotes/infrastructure/latex/company.example.tex` (public): an invented company, used by the
+  tests and as the template for the real file.
+- `data/private/branding/company.tex` and `data/private/branding/assets/` (git-ignored): the real
+  company data and images. Copy the example file there and fill it in.
+
+A document loads the company file first and the style second. Missing images render as a labelled
+placeholder box instead of failing the build. The compile test needs `tectonic` and is skipped
+when it is not installed.
