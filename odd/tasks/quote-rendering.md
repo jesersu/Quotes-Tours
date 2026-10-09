@@ -15,7 +15,7 @@ Turn a hand-written quote request into a branded PDF: look the items up in the c
 - Delivery strategy: `ask-on-risk`, chain strategy `stacked-to-main` (numbered branches merged to `main`, as in phases 1 and 2). Inferred from the repository history; the owner can change it.
 
 ## Scope
-- T1 only is authorized so far. T2 to T6 are planned and wait for the owner's go-ahead.
+- T1 and T2 are authorized (T2 on 2026-10-08). T3 to T6 are planned and wait for the owner's go-ahead.
 
 ## Constraints
 - Public repository: no real prices, margins, supplier data, company identity or company images are committed.
@@ -28,7 +28,7 @@ Turn a hand-written quote request into a branded PDF: look the items up in the c
 
 ## Tasks
 - [x] T1 — Branding split: public style file, public example company, private company data and images. Route: inline (one non-trivial file, the test; the rest is a mechanical port of the existing template). Evidence: RED (`ModuleNotFoundError: quotes.infrastructure.latex`) then GREEN 6 passed in `tests/infrastructure/test_latex_branding.py`, including the `tectonic` compile in Spanish and English; full suite 292 passed, 16 skipped; `ruff check` and `ruff format --check` clean. Checked by eye: a sample document compiles to 2 pages with the example company (placeholder boxes) and with the private company data and its 4 images; extracted text keeps `¿ ¡ ñ ü`. Changes from the source template: company data removed, a guard that fails when the company file is not loaded first, `\ifdraft` defaults to final when undeclared, a Unicode font (TeX Gyre Heros) under XeTeX/LuaTeX because the pdfLaTeX font setup misplaces `¿` and `¡` there, and the logo falls back to a placeholder box like the other images.
-- [ ] T2 — `QuoteRequest` and the `build_quote` use case (catalog lookup, lines, `price_quote`). Not yet authorized.
+- [x] T2 — `QuoteRequest` and the `build_quote` use case (catalog lookup, lines, `price_quote`). Route: delegated writer (two non-trivial files; the reading that prepares the write went with it). Files: `src/quotes/application/quote.py` (154 lines), `tests/application/test_quote.py` (320 lines); about 474 lines, over the 400-line heuristic because the tests were kept in full. Evidence, writer: RED (`ModuleNotFoundError: quotes.application.quote`) then GREEN 43 passed; full suite 340 passed, 16 skipped; ruff clean. Parent: structural readback of `quote.py` (no money arithmetic outside the domain; only the two allowed files changed) and spot check re-running the full suite, `ruff check` and `ruff format --check` with the same results. Contract for the next tasks: `RequestedItem(item_id, days=None, quantity=None)`, `RequestedExtra(label, items)`, `QuoteRequest(days, travelers, items, extras=(), paid_locally=())`, `QuotedLine(entry, line)`, `QuotedExtra(label, lines, breakdown)`, `Quote(request, lines, breakdown, extras, paid_locally)`, `build_quote(request, catalog, policy)`. Notes: per-item `days` overrides the request's; duplicate `paid_locally` ids are rejected in the request because `price_quote` does not check them; duplicate extra labels and a `PER_UNIT` item without quantity are rejected by the domain when `build_quote` runs.
 - [ ] T3 — `QuoteRenderer` port and LaTeX adapter in Spanish (escaping, money format, price table). Not yet authorized.
 - [ ] T4 — PDF compilation with `tectonic`. Not yet authorized.
 - [ ] T5 — English output. Not yet authorized.
@@ -62,7 +62,10 @@ Turn a hand-written quote request into a branded PDF: look the items up in the c
   - Diagnostics: `\brandingdiag` now uses `\coimgstatus`, which looks in the local `assets/` first and then in `\CoAssetsDir`, like the image macros. RED (`\coimgstatus` undefined) then GREEN, with one image only in each folder and an assets path containing an underscore.
   - Coverage: the compile tests now assert through the log that the declared language is the one resolved, that a document with no declarations is Spanish and final, that `\drafttrue` is respected, and that loading the style without the company file fails with the guard message. These four passed on first run; they add proof, not a behaviour change. The compile runs with the document folder as working directory.
   - Evidence: 11 passed in `tests/infrastructure/test_latex_branding.py`; full suite 297 passed, 16 skipped; ruff clean; the real-data sample still compiles to 2 pages.
+- Range main..380a61c (the branch with that follow-up, 6 files, 661 lines): consent granted by owner; reliability lens APPROVED; acknowledged (lineage review-ad8aba73c72b9c5d). Merged as PR #6. New advisories, non-blocking, none verified: W no automated test includes an image from the company folder (checked by hand only); S a missing image leaves no trace in the log, so a final document can ship with placeholder boxes (worth a log warning in T4); S the placeholder test asserts compile only; S `\CoEmail` and `\CoWeb` are printed raw, so an underscore in them would break the build.
 - Not addressed (owner's call): the pdfLaTeX font branch is not compiled anywhere (no pdfLaTeX on this machine or in CI); CI still runs only the regex tests because it has no `tectonic`; the three suggestions and the `\CoLang` one.
 
+- T2 done on branch `feat/render-02-build-quote` (from main 248ee14).
+
 ## Next step
-Push and open the PR for this branch, then go-ahead for T2. Before T3, read the price table layout from a hand-written quote.
+Before T3, read the price table layout from a hand-written quote; then owner go-ahead for T3. Before T3, read the price table layout from a hand-written quote.
