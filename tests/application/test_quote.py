@@ -318,3 +318,57 @@ def test_lists_are_normalized_to_tuples():
     assert req.items == (RequestedItem("van"),)
     assert req.extras == (extra,)
     assert req.paid_locally == ("ticket",)
+
+
+def two_extras_request() -> QuoteRequest:
+    return request(
+        extras=(
+            RequestedExtra("Upgrade", (RequestedItem("hotel"),)),
+            RequestedExtra("Dinner", (RequestedItem("meal", quantity=4),)),
+        )
+    )
+
+
+def assert_each_extra_keeps_its_own_lines_and_breakdown(quote: Quote) -> None:
+    by_label = {extra.label: extra for extra in quote.extras}
+    assert set(by_label) == {"Upgrade", "Dinner"}
+    for label, item_id in (("Upgrade", "hotel"), ("Dinner", "meal")):
+        extra = by_label[label]
+        assert [quoted.entry.id for quoted in extra.lines] == [item_id]
+        (expected,) = price_optional_extras(
+            [(label, [quoted.line for quoted in extra.lines])], Travelers(2), POLICY
+        )
+        assert extra.breakdown == expected.breakdown
+    assert by_label["Upgrade"].breakdown != by_label["Dinner"].breakdown
+
+
+def test_each_extra_keeps_its_own_lines_and_breakdown():
+    quote = build_quote(two_extras_request(), make_catalog(), POLICY)
+
+    assert [extra.label for extra in quote.extras] == ["Upgrade", "Dinner"]
+    assert_each_extra_keeps_its_own_lines_and_breakdown(quote)
+
+
+def test_extras_are_matched_by_label_not_by_position(monkeypatch):
+    def reversed_pricing(extras, travelers, policy):
+        return tuple(reversed(price_optional_extras(extras, travelers, policy)))
+
+    monkeypatch.setattr("quotes.application.quote.price_optional_extras", reversed_pricing)
+
+    quote = build_quote(two_extras_request(), make_catalog(), POLICY)
+
+    assert [extra.label for extra in quote.extras] == ["Upgrade", "Dinner"]
+    assert_each_extra_keeps_its_own_lines_and_breakdown(quote)
+
+
+@pytest.mark.parametrize("field", ["items", "extras", "paid_locally"])
+@pytest.mark.parametrize("value", [None, 5, "ticket", b"ticket"])
+def test_request_rejects_collections_that_are_not_lists(field, value):
+    with pytest.raises(InvalidPricingInput):
+        request(**{field: value})
+
+
+@pytest.mark.parametrize("items", [None, 5, "van", b"van"])
+def test_requested_extra_rejects_items_that_are_not_a_list(items):
+    with pytest.raises(InvalidPricingInput):
+        RequestedExtra("Upgrade", items)

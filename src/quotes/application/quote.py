@@ -29,6 +29,16 @@ def _require_positive_or_none(label: str, value: object) -> None:
         raise InvalidPricingInput(f"{label} must be an integer of at least 1")
 
 
+def _as_tuple(label: str, value: object) -> tuple:
+    """Normalize a list-like value; text and non-iterables are rejected, not split or crashed on."""
+    if isinstance(value, str | bytes):
+        raise InvalidPricingInput(f"{label} must be a list, not text")
+    try:
+        return tuple(value)
+    except TypeError as exc:
+        raise InvalidPricingInput(f"{label} must be a list") from exc
+
+
 def _require_items(label: str, items: tuple[object, ...]) -> None:
     if not items:
         raise InvalidPricingInput(f"{label} needs at least one item")
@@ -59,7 +69,7 @@ class RequestedExtra:
 
     def __post_init__(self) -> None:
         _require_text("Extra label", self.label)
-        object.__setattr__(self, "items", tuple(self.items))
+        object.__setattr__(self, "items", _as_tuple("Extra items", self.items))
         _require_items("Extra", self.items)
 
 
@@ -76,9 +86,9 @@ class QuoteRequest:
             raise InvalidPricingInput("Days must be an integer of at least 1")
         if not isinstance(self.travelers, Travelers):
             raise InvalidPricingInput("Travelers must be a Travelers instance")
-        object.__setattr__(self, "items", tuple(self.items))
-        object.__setattr__(self, "extras", tuple(self.extras))
-        object.__setattr__(self, "paid_locally", tuple(self.paid_locally))
+        object.__setattr__(self, "items", _as_tuple("Quote items", self.items))
+        object.__setattr__(self, "extras", _as_tuple("Extras", self.extras))
+        object.__setattr__(self, "paid_locally", _as_tuple("Paid-locally ids", self.paid_locally))
         _require_items("Quote", self.items)
         if not all(isinstance(extra, RequestedExtra) for extra in self.extras):
             raise InvalidPricingInput("Extras must contain only requested extras")
@@ -147,8 +157,10 @@ def build_quote(request: QuoteRequest, catalog: Catalog, policy: PricingPolicy) 
         request.travelers,
         policy,
     )
+    # Matched by label (the domain guarantees labels are unique), never by position.
+    breakdown_by_label = {price.label: price.breakdown for price in priced}
     extras = tuple(
-        QuotedExtra(price.label, quoted_lines, price.breakdown)
-        for price, (_, quoted_lines) in zip(priced, extra_lines, strict=True)
+        QuotedExtra(label, quoted_lines, breakdown_by_label[label])
+        for label, quoted_lines in extra_lines
     )
     return Quote(request, lines, breakdown, extras, paid_locally)
