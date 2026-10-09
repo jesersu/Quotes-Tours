@@ -69,6 +69,8 @@ class RequestedExtra:
 
     def __post_init__(self) -> None:
         _require_text("Extra label", self.label)
+        # The domain trims labels; store the same form so results match back by label.
+        object.__setattr__(self, "label", self.label.strip())
         object.__setattr__(self, "items", _as_tuple("Extra items", self.items))
         _require_items("Extra", self.items)
 

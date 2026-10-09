@@ -372,3 +372,12 @@ def test_request_rejects_collections_that_are_not_lists(field, value):
 def test_requested_extra_rejects_items_that_are_not_a_list(items):
     with pytest.raises(InvalidPricingInput):
         RequestedExtra("Upgrade", items)
+
+
+def test_extra_label_is_trimmed_and_still_matched_to_its_breakdown():
+    padded = request(extras=(RequestedExtra("  Upgrade ", (RequestedItem("hotel"),)),))
+
+    quote = build_quote(padded, make_catalog(), POLICY)
+
+    assert padded.extras[0].label == "Upgrade"
+    assert [extra.label for extra in quote.extras] == ["Upgrade"]
