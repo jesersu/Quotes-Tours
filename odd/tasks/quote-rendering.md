@@ -56,5 +56,13 @@ Turn a hand-written quote request into a branded PDF: look the items up in the c
   - S: with `tectonic` installed but offline or with a cold cache, the compile test fails or times out instead of skipping; glyphs are checked by eye only.
   - S: nothing asserts that the `.tex` files ship in a non-editable install.
 
+- Range main..d2bcbd1 (same code plus the review log above, 6 files, 542 lines): the stop hook raised the accumulated branch as a new target; consent granted by owner; reliability lens APPROVED; acknowledged (lineage review-1480f6d51d3b35fd). Same advisories, plus S: a `\CoLang` value other than exactly `en` silently produces Spanish.
+- Follow-up commit `fix(infrastructure): harden brand style placeholders and diagnostics` addresses the three warnings, at the owner's request:
+  - Placeholder: file names and paths are printed through `\coverbatim` (detokenized). RED: a missing image named with an underscore failed the build, confirming the advisory. GREEN after the fix.
+  - Diagnostics: `\brandingdiag` now uses `\coimgstatus`, which looks in the local `assets/` first and then in `\CoAssetsDir`, like the image macros. RED (`\coimgstatus` undefined) then GREEN, with one image only in each folder and an assets path containing an underscore.
+  - Coverage: the compile tests now assert through the log that the declared language is the one resolved, that a document with no declarations is Spanish and final, that `\drafttrue` is respected, and that loading the style without the company file fails with the guard message. These four passed on first run; they add proof, not a behaviour change. The compile runs with the document folder as working directory.
+  - Evidence: 11 passed in `tests/infrastructure/test_latex_branding.py`; full suite 297 passed, 16 skipped; ruff clean; the real-data sample still compiles to 2 pages.
+- Not addressed (owner's call): the pdfLaTeX font branch is not compiled anywhere (no pdfLaTeX on this machine or in CI); CI still runs only the regex tests because it has no `tectonic`; the three suggestions and the `\CoLang` one.
+
 ## Next step
-Owner decides on the advisory items, then go-ahead for T2. Before T3, read the price table layout from a hand-written quote.
+Push and open the PR for this branch, then go-ahead for T2. Before T3, read the price table layout from a hand-written quote.

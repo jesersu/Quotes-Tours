@@ -144,7 +144,16 @@
     {\includegraphics[height=#2,keepaspectratio]{assets/#1}}%
     {\IfFileExists{\CoAssetsDir#1}%
       {\includegraphics[height=#2,keepaspectratio]{\CoAssetsDir#1}}%
-      {\fbox{\parbox[c][#2][c]{4cm}{\centering\footnotesize\color{brandslate}missing image:\\\texttt{#1}}}}}}
+      {\fbox{\parbox[c][#2][c]{4cm}{\centering\footnotesize\color{brandslate}missing image:\\\coverbatim{#1}}}}}}
+
+% Prints a file name or path literally. Names with an underscore or another
+% TeX-special character would otherwise break the build in text mode.
+\newcommand{\coverbatim}[1]{\texttt{\expandafter\detokenize\expandafter{#1}}}
+
+% Runs #2 when image #1 is found where \safeimg and \cologo look for it
+% (the document's own assets/ first, then \CoAssetsDir), and #3 otherwise.
+\newcommand{\coimgstatus}[3]{%
+  \IfFileExists{assets/#1}{#2}{\IfFileExists{\CoAssetsDir#1}{#2}{#3}}}
 
 % The logo, with the same fallback, sized by width for the letterhead.
 \newcommand{\cologo}{%
@@ -223,11 +232,11 @@
 % found. Put it on a draft page when an image does not show up.
 \newcommand{\brandingdiag}{%
   \par{\footnotesize\color{brandslate}
-  \textbf{Resolved paths.}   Image folder: \texttt{\CoAssetsDir}\\
-  \IfFileExists{\CoAssetsDir\CoLogoFile}{Logo: found}{\textbf{Logo: NOT found}}\\
-  \IfFileExists{\CoAssetsDir\CoConstanciaFile}{Certificate: found}{\textbf{Certificate: NOT found}}\\
-  \IfFileExists{\CoAssetsDir\CoVehicleFileA}{Vehicle photo A: found}{\textbf{Vehicle photo A: NOT found}}\\
-  \IfFileExists{\CoAssetsDir\CoVehicleFileB}{Vehicle photo B: found}{\textbf{Vehicle photo B: NOT found}}
+  \textbf{Resolved paths.}   Image folder: \coverbatim{\CoAssetsDir}\\
+  \coimgstatus{\CoLogoFile}{Logo: found}{\textbf{Logo: NOT found}}\\
+  \coimgstatus{\CoConstanciaFile}{Certificate: found}{\textbf{Certificate: NOT found}}\\
+  \coimgstatus{\CoVehicleFileA}{Vehicle photo A: found}{\textbf{Vehicle photo A: NOT found}}\\
+  \coimgstatus{\CoVehicleFileB}{Vehicle photo B: found}{\textbf{Vehicle photo B: NOT found}}
   \par}}
 
 % --- Your vehicle, driver and guide -----------------------------------
