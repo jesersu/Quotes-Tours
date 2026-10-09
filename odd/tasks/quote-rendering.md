@@ -46,5 +46,15 @@ Turn a hand-written quote request into a branded PDF: look the items up in the c
 
 - T1 done. Private data copied to `data/private/branding/` (git-ignored, not committed).
 
+## Review log
+- T1, commit 08a9f64 (range main..08a9f64, 6 files, 532 lines): assess risk=medium, review_due=slice_budget_reached; consent granted by owner; reliability lens APPROVED; acknowledged (gentle-ai.review-acknowledged/v1, lineage review-ab3070fdc65d427a). Reviewed boundary advances to 08a9f64.
+- Advisory, non-blocking (owner decides; none verified by the parent yet):
+  - W: the missing-image placeholder prints the raw file name in `\texttt`; a name with `_`, `&` or `#` would break the build in the very case the fallback exists for.
+  - W: `\brandingdiag` is not exercised by any test, prints the folder path raw, and checks only `\CoAssetsDir` while the image macros look in the local `assets/` first.
+  - W: untested paths: the guard when the company file is missing, the undeclared draft switch, the default language and image folder, `\drafttrue`, and the pdfLaTeX font branch. In CI only the regex tests run.
+  - S: the definition regex sees only braced `\newcommand`-style forms, not `\def`, `\edef` or `\let`.
+  - S: with `tectonic` installed but offline or with a cold cache, the compile test fails or times out instead of skipping; glyphs are checked by eye only.
+  - S: nothing asserts that the `.tex` files ship in a non-editable install.
+
 ## Next step
-Owner go-ahead for T2. Before T3, read the price table layout from a hand-written quote.
+Owner decides on the advisory items, then go-ahead for T2. Before T3, read the price table layout from a hand-written quote.
