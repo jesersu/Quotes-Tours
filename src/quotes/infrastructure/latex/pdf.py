@@ -101,6 +101,12 @@ def compile_pdf(
                 else "tectonic finished but produced no PDF"
             )
             raise TectonicFailed(reason, _tail(log if log.strip() else completed.stderr or ""))
+        if not log.strip():
+            # Missing images are read from the log; without it "none missing" would be a guess.
+            raise TectonicFailed(
+                "tectonic produced no log, so missing brand images cannot be checked",
+                _tail(completed.stderr or ""),
+            )
 
     write_new_bytes(output_path, pdf, force=force)
     return PdfResult(output_path, _missing_images(log))

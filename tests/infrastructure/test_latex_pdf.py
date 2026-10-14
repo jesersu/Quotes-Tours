@@ -33,12 +33,13 @@ needs_tectonic = pytest.mark.skipif(
 
 SECRET_TEX = r"\documentclass{article}\begin{document}Cliente Secreto\end{document}"
 PDF_BYTES = b"%PDF-1.5\nfake"
+CLEAN_LOG = "This is XeTeX, fake run\nOutput written on doc.pdf\n"
 
 
 class FakeTectonic:
     """A stand-in for ``subprocess.run`` that mimics what tectonic leaves in ``--outdir``."""
 
-    def __init__(self, *, pdf=PDF_BYTES, log="", returncode=0, stderr="", raises=None):
+    def __init__(self, *, pdf=PDF_BYTES, log=CLEAN_LOG, returncode=0, stderr="", raises=None):
         self.pdf, self.log, self.returncode = pdf, log, returncode
         self.stderr, self.raises = stderr, raises
         self.calls = []
@@ -51,7 +52,8 @@ class FakeTectonic:
         self.outdir = Path(command[command.index("--outdir") + 1])
         if self.pdf is not None:
             (self.outdir / "doc.pdf").write_bytes(self.pdf)
-        (self.outdir / "doc.log").write_text(self.log, encoding="utf-8")
+        if self.log is not None:
+            (self.outdir / "doc.log").write_text(self.log, encoding="utf-8")
         return subprocess.CompletedProcess(command, self.returncode, "", self.stderr)
 
 
@@ -165,6 +167,22 @@ def test_exit_zero_without_a_usable_pdf_is_a_failure(tmp_path, pdf):
 
     assert "Emergency stop" in info.value.log_tail
     assert not fake.outdir.exists() and not (tmp_path / "q.pdf").exists()
+
+
+@pytest.mark.parametrize("log", [None, "", "  \n"])
+def test_a_successful_compile_without_a_log_fails_instead_of_reporting_no_missing_images(
+    tmp_path, log
+):
+    # Missing images are read from the log; without it "none missing" would be a guess.
+    fake = FakeTectonic(log=log, stderr="tectonic said something")
+    target = tmp_path / "q.pdf"
+
+    with pytest.raises(TectonicFailed, match="no log") as caught:
+        compile_pdf(SECRET_TEX, target, runner=fake)
+
+    assert not target.exists()
+    assert "tectonic said something" in caught.value.log_tail
+    assert not fake.outdir.exists()
 
 
 def test_every_error_is_a_pdf_compilation_error():
