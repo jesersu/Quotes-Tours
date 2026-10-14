@@ -4,7 +4,7 @@ import stat
 import pytest
 
 from quotes.infrastructure import output_file
-from quotes.infrastructure.output_file import OutputExists, write_new_file
+from quotes.infrastructure.output_file import OutputExists, write_new_bytes, write_new_file
 
 
 def mode(path):
@@ -70,3 +70,67 @@ def test_failed_replace_keeps_previous_content_and_removes_the_temp_file(tmp_pat
     with pytest.raises(OSError, match="replace failed"):
         write_new_file(target, "new", force=True)
     assert target.read_text() == "previous" and siblings(target) == ["out.txt"]
+
+
+# --- bytes variant ------------------------------------------------------------
+
+PAYLOAD = b"%PDF-1.5\n\xff\x00binary"
+
+
+def test_new_bytes_file_is_owner_only_and_leaves_no_temp_file(tmp_path):
+    target = tmp_path / "sub" / "out.pdf"
+    write_new_bytes(target, PAYLOAD, force=False)
+    assert target.read_bytes() == PAYLOAD and mode(target) == 0o600
+    assert siblings(target) == ["out.pdf"]
+
+
+def test_forced_bytes_overwrite_tightens_permissions_of_a_wider_existing_file(tmp_path):
+    target = tmp_path / "out.pdf"
+    target.write_bytes(b"old")
+    target.chmod(0o644)
+    write_new_bytes(target, PAYLOAD, force=True)
+    assert target.read_bytes() == PAYLOAD and mode(target) == 0o600
+    assert siblings(target) == ["out.pdf"]
+
+
+def test_bytes_refusal_without_force_leaves_the_file_untouched(tmp_path):
+    target = tmp_path / "out.pdf"
+    target.write_bytes(b"old")
+    target.chmod(0o644)
+    with pytest.raises(OutputExists, match="--force"):
+        write_new_bytes(target, PAYLOAD, force=False)
+    assert target.read_bytes() == b"old" and mode(target) == 0o644
+    assert siblings(target) == ["out.pdf"]
+
+
+@pytest.mark.parametrize("force", [True, False])
+def test_failed_bytes_write_keeps_previous_content_and_removes_the_temp_file(
+    tmp_path, monkeypatch, force
+):
+    target = tmp_path / "out.pdf"
+    if force:
+        target.write_bytes(b"previous")
+
+    def boom(_fd):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(output_file.os, "fsync", boom)
+    with pytest.raises(OSError, match="disk full"):
+        write_new_bytes(target, PAYLOAD, force=force)
+    assert (target.read_bytes() == b"previous") if force else not target.exists()
+    assert siblings(target) == (["out.pdf"] if force else [])
+
+
+def test_failed_bytes_replace_keeps_previous_content_and_removes_the_temp_file(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "out.pdf"
+    target.write_bytes(b"previous")
+
+    def boom(_src, _dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(output_file.os, "replace", boom)
+    with pytest.raises(OSError, match="replace failed"):
+        write_new_bytes(target, PAYLOAD, force=True)
+    assert target.read_bytes() == b"previous" and siblings(target) == ["out.pdf"]
