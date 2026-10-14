@@ -80,6 +80,11 @@ Turn a hand-written quote request into a branded PDF: look the items up in the c
 - Range main..9b707b9 (the branch with that fix, 3 files, 564 lines): consent granted by owner; reliability lens APPROVED; acknowledged (lineage review-abec4417f62dba58). Merged as PR #8 (456c296). Advisory, non-blocking, none addressed: S sets and dicts are accepted as collections (to be closed in T6); S an explicit quantity on a non-`PER_UNIT` item and a non-text local payment id are untested; S the trimmed-label test does not assert the breakdown.
 - Not addressed (owner's call): the pdfLaTeX font branch is not compiled anywhere (no pdfLaTeX on this machine or in CI); CI still runs only the regex tests because it has no `tectonic`; the three suggestions and the `\CoLang` one.
 
+- T3, commit 40284fb (range ebd5be9..40284fb, 7 files, 967 lines): assess risk=medium, review_due=slice_budget_reached; consent granted by owner; reliability lens APPROVED; acknowledged (lineage review-8e7bc51ab3deef47). The untracked `odd/tasks/.obsidian/` folder (owner's editor settings) was declared excluded. Advisory, non-blocking:
+  - W: the empty group before service names was proved only by a `tectonic` compile, which CI skips. Addressed at the owner's request: a text-level test checks that every service row starts with the empty group. It failed with the guard removed and passes with it (no new RED is possible, the guard already existed).
+  - W: paid-locally rows were emitted only for the three labeled visitor categories, so any other was dropped silently. Verified by the parent: `LocalPrice` does not check the category type, so a fourth value reaches the renderer. Addressed at the owner's request: the renderer now raises `ValueError` naming the category, and rows keep the fixed visitor order. RED (`DID NOT RAISE ValueError`) then GREEN.
+  - S, not addressed: `escape_latex` lets other C0 control characters through; only `\n`, `\r\n` and `\t` are tested.
+  - Evidence after the follow-up: full suite 447 passed, 16 skipped; ruff clean.
 - T2 done on branch `feat/render-02-build-quote` (from main 248ee14).
 
 ## Next step

@@ -416,6 +416,38 @@ def test_paid_locally_shows_reference_prices_by_visitor_category():
     assert "no forman parte del total" in section
 
 
+def test_paid_locally_rows_follow_the_fixed_visitor_order():
+    info = LocalPaymentInfo(
+        "Tourist ticket",
+        (
+            LocalPrice(VisitorCategory.CHILD_6_15, pen("11.00")),
+            LocalPrice(VisitorCategory.FOREIGN_ADULT, pen("71.00")),
+        ),
+    )
+    local = LocalPaymentEntry("ticket", info, "Boleto turístico", "Tourist ticket")
+    text = render(quote_of([entry("van")], local=[local]))
+
+    assert text.index("Adulto extranjero") < text.index("Niño de 6 a 15 años")
+    assert "Adulto latinoamericano" not in text
+
+
+def test_a_visitor_category_without_a_label_fails_instead_of_being_dropped():
+    # LocalPrice does not check the category type; a value with no Spanish label must not
+    # silently disappear from the document the client pays from.
+    info = LocalPaymentInfo(
+        "Tourist ticket",
+        (
+            LocalPrice(VisitorCategory.FOREIGN_ADULT, pen("71.00")),
+            LocalPrice("resident_adult", pen("21.00")),
+        ),
+    )
+    local = LocalPaymentEntry("ticket", info, "Boleto turístico", "Tourist ticket")
+    quote = quote_of([entry("van")], local=[local])
+
+    with pytest.raises(ValueError, match="resident_adult"):
+        render(quote)
+
+
 def test_body_ends_with_credentials_and_signature_in_order():
     text = render(simple_quote())
 
@@ -458,6 +490,22 @@ def test_every_user_value_is_escaped():
         assert f"{prefix} {NASTY_ESCAPED}" in text
     assert "cat\\_1" in text
     assert NASTY not in text
+
+
+def test_service_names_are_guarded_against_the_previous_row_break():
+    # After a row break LaTeX reads a following "[" or "*" as an option; every service row
+    # starts with an empty group to stop it. Checked on the text so it holds without tectonic.
+    entries = [entry("van", name_es="[Opcional] Van"), entry("extra", name_es="*Extra")]
+    text = render(
+        quote_of(
+            entries,
+            ["van"],
+            extras=(RequestedExtra("Más", (RequestedItem("extra"),)),),
+        )
+    )
+
+    assert "\n{}[Opcional] Van & por grupo" in text
+    assert "\n{}*Extra & por grupo" in text
 
 
 # --- real compile -----------------------------------------------------------

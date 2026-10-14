@@ -10,6 +10,7 @@ import datetime
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
+from quotes.application.catalog import LocalPaymentEntry
 from quotes.application.quote import QuotedLine
 from quotes.application.quote_rendering import QuoteDocument
 from quotes.domain.catalog import PricingUnit
@@ -59,6 +60,8 @@ _VISITOR_LABELS = (
     (VisitorCategory.FOREIGN_ADULT, "Adulto extranjero"),
     (VisitorCategory.CHILD_6_15, "Niño de 6 a 15 años"),
 )
+_VISITOR_HEADINGS = dict(_VISITOR_LABELS)
+_VISITOR_ORDER = {category: index for index, (category, _) in enumerate(_VISITOR_LABELS)}
 
 _TABLE_OPEN = "\\noindent\n\\begin{tabularx}{\\linewidth}{@{}Xl@{}}"
 _PRICE_TABLE_OPEN = "\\noindent\n\\begin{tabularx}{\\linewidth}{@{}Xr@{}}"
@@ -157,16 +160,27 @@ def _extras_section(document: QuoteDocument) -> list[str]:
     return parts
 
 
+def _local_price_rows(local: LocalPaymentEntry) -> list[str]:
+    """One row per reference price, in the fixed visitor order.
+
+    A category with no Spanish label fails loudly: dropping it would hide a price the client
+    is expected to pay on site.
+    """
+    for price in local.info.prices:
+        if price.category not in _VISITOR_HEADINGS:
+            raise ValueError(f"No Spanish label for visitor category {price.category!r}")
+    prices = sorted(local.info.prices, key=lambda price: _VISITOR_ORDER[price.category])
+    return [
+        f"{_VISITOR_HEADINGS[price.category]} & {format_money(price.price)} \\\\"
+        for price in prices
+    ]
+
+
 def _local_payments_section(document: QuoteDocument) -> list[str]:
     parts = ["\\sect{Pagos en destino}"]
     for local in document.quote.paid_locally:
         parts.append(f"\\par\\medskip\\noindent\\textbf{{{escape_latex(local.name_es)}}}\\par")
-        rows = [_PRICE_TABLE_OPEN]
-        for category, label in _VISITOR_LABELS:
-            for price in local.info.prices:
-                if price.category == category:
-                    rows.append(f"{label} & {format_money(price.price)} \\\\")
-        rows.append(_TABLE_CLOSE)
+        rows = [_PRICE_TABLE_OPEN, *_local_price_rows(local), _TABLE_CLOSE]
         parts.append("\n".join(rows))
     parts.append(
         "\\notebox{Estos importes se pagan directamente en destino y no forman parte del total.}"
