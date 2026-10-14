@@ -17,6 +17,7 @@ _LOG_TAIL_LINES = 40
 # TeX wraps log lines at about 79 columns, so the end token tells where a wrapped name stops.
 _MISSING_IMAGE_MARKER = "BRANDING-MISSING-IMAGE:"
 _MISSING_IMAGE_END = ":END-BRANDING-MISSING-IMAGE"
+_MAX_WRAPPED_LINES = 8  # about 600 characters of file name
 
 
 class PdfCompilationError(Exception):
@@ -66,10 +67,21 @@ def _missing_images(log: str) -> tuple[str, ...]:
         if not line.startswith(_MISSING_IMAGE_MARKER):
             continue
         # TeX breaks long lines without adding characters, so join until the end token shows up.
-        joined = line
-        while _MISSING_IMAGE_END not in joined and index < len(lines):
-            joined += lines[index]
-            index += 1
+        # The join is bounded and stops at the next marker: without the end token (a truncated
+        # log) only the marker's own line is kept, so later lines and markers are not swallowed.
+        joined, end = line, index
+        while (
+            _MISSING_IMAGE_END not in joined
+            and end < len(lines)
+            and end - index < _MAX_WRAPPED_LINES
+            and not lines[end].startswith(_MISSING_IMAGE_MARKER)
+        ):
+            joined += lines[end]
+            end += 1
+        if _MISSING_IMAGE_END in joined:
+            index = end
+        else:
+            joined = line
         name = joined[len(_MISSING_IMAGE_MARKER) :].split(_MISSING_IMAGE_END, 1)[0].strip()
         if name:
             names.setdefault(name)

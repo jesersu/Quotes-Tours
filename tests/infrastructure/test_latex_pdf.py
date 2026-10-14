@@ -120,12 +120,21 @@ def test_a_missing_name_wrapped_across_log_lines_is_rejoined(tmp_path):
     assert result.missing_images == (name, "after.png")
 
 
-def test_a_name_without_the_end_token_keeps_what_was_collected(tmp_path):
-    log = "BRANDING-MISSING-IMAGE: cut-off-na\nme.png\n"
+def test_an_unterminated_marker_keeps_only_its_own_line(tmp_path):
+    # A truncated log can lose the end token; the rest of the log must not become the name.
+    log = "BRANDING-MISSING-IMAGE: cut-off-na\nCliente Secreto overfull box\n" + "noise\n" * 20
 
     result = compile_pdf(SECRET_TEX, tmp_path / "q.pdf", runner=FakeTectonic(log=log))
 
-    assert result.missing_images == ("cut-off-name.png",)
+    assert result.missing_images == ("cut-off-na",)
+
+
+def test_an_unterminated_marker_does_not_hide_the_next_one(tmp_path):
+    log = f"BRANDING-MISSING-IMAGE: cut-off-na\nnoise\n{marker('next.png')}\n"
+
+    result = compile_pdf(SECRET_TEX, tmp_path / "q.pdf", runner=FakeTectonic(log=log))
+
+    assert result.missing_images == ("cut-off-na", "next.png")
 
 
 def test_existing_output_is_refused_before_compiling(tmp_path):
