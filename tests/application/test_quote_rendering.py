@@ -6,7 +6,7 @@ import pytest
 
 from quotes.application.catalog import Catalog, CatalogEntry
 from quotes.application.quote import QuoteRequest, RequestedItem, build_quote
-from quotes.application.quote_rendering import QuoteDocument
+from quotes.application.quote_rendering import Language, QuoteDocument
 from quotes.domain.catalog import CatalogItem, PricingUnit
 from quotes.domain.errors import InvalidPricingInput
 from quotes.domain.money import Currency, Money
@@ -67,3 +67,32 @@ def test_issued_on_must_be_a_plain_date(value):
 def test_document_is_immutable():
     with pytest.raises(FrozenInstanceError):
         document().title = "other"
+
+
+def test_language_defaults_to_spanish():
+    assert document().language is Language.SPANISH
+
+
+def test_language_values_are_the_iso_codes():
+    assert (Language.SPANISH.value, Language.ENGLISH.value) == ("es", "en")
+
+
+def test_language_is_the_last_positional_field():
+    doc = QuoteDocument(make_quote(), "Ana", "T", date(2026, 10, 13), "Equipo", Language.ENGLISH)
+
+    assert doc.language is Language.ENGLISH
+
+
+def test_language_member_is_kept():
+    assert document(language=Language.ENGLISH).language is Language.ENGLISH
+
+
+@pytest.mark.parametrize(("value", "member"), [("en", Language.ENGLISH), ("es", Language.SPANISH)])
+def test_language_string_is_converted_to_the_member(value, member):
+    assert document(language=value).language is member
+
+
+@pytest.mark.parametrize("value", ["fr", "EN", "", None, 5])
+def test_language_must_be_a_known_language(value):
+    with pytest.raises(InvalidPricingInput, match="[Ll]anguage"):
+        document(language=value)
