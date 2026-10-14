@@ -201,6 +201,7 @@ def test_diagnostics_look_where_the_images_are_actually_loaded_from(tmp_path):
 
 
 MISSING_LINE = "BRANDING-MISSING-IMAGE:"
+END_TOKEN = ":END-BRANDING-MISSING-IMAGE"
 
 
 @needs_tectonic
@@ -218,8 +219,8 @@ def test_missing_image_and_missing_logo_each_leave_a_line_in_the_log(tmp_path):
     )
 
     assert_compiled(tmp_path, result)
-    assert f"{MISSING_LINE} example-logo.png" in log
-    assert f"{MISSING_LINE} not_there_a.jpeg" in log  # literal, underscore included
+    assert f"{MISSING_LINE} example-logo.png {END_TOKEN}" in log
+    assert f"{MISSING_LINE} not_there_a.jpeg {END_TOKEN}" in log  # literal, underscore included
 
 
 @needs_tectonic
@@ -231,7 +232,7 @@ def test_special_characters_in_a_missing_name_are_printed_literally(tmp_path):
     result, log = compile_document(tmp_path, preamble, body=r"\safeimg{\weird}{2cm}")
 
     assert_compiled(tmp_path, result)
-    assert f"{MISSING_LINE} a_b&c#d.png" in log
+    assert f"{MISSING_LINE} a_b&c#d.png {END_TOKEN}" in log
 
 
 @needs_tectonic

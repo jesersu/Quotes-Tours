@@ -15,7 +15,8 @@ from quotes.domain.catalog import CatalogItem, PricingUnit
 from quotes.domain.money import Currency, Money
 from quotes.domain.pricing import PricingPolicy
 from quotes.domain.travelers import Travelers
-from quotes.infrastructure.latex import EXAMPLE_COMPANY_PATH
+from quotes.infrastructure.latex import EXAMPLE_COMPANY_PATH, STYLE_PATH
+from quotes.infrastructure.latex import pdf as pdf_module
 from quotes.infrastructure.latex.pdf import (
     PdfCompilationError,
     PdfResult,
@@ -84,16 +85,47 @@ def test_the_tectonic_binary_and_timeout_are_configurable(tmp_path):
     assert command[0] == "/opt/tectonic" and kwargs["timeout"] == 5
 
 
+def marker(name: str) -> str:
+    return f"BRANDING-MISSING-IMAGE: {name} :END-BRANDING-MISSING-IMAGE"
+
+
+def wrap(text: str, width: int = 79) -> str:
+    """Break lines the way TeX does: at a fixed column, adding no characters."""
+    return "\n".join(text[i : i + width] for i in range(0, len(text), width))
+
+
+LONG_NAME = "a-very-long-brand-image-file-name-for-the-certificate-of-the-company-2026-final-v2.png"
+
+
 def test_missing_images_come_from_the_log_in_order_without_duplicates(tmp_path):
     log = (
         "noise\n"
-        "BRANDING-MISSING-IMAGE: example-logo.png\n"
-        "BRANDING-MISSING-IMAGE: not_there_a.jpeg\n"
-        "BRANDING-MISSING-IMAGE: example-logo.png\n"
-        "BRANDING-MISSING-IMAGE:   spaced.png  \n"
+        f"{marker('example-logo.png')}\n"
+        f"{marker('not_there_a.jpeg')}\n"
+        f"{marker('example-logo.png')}\n"
+        "BRANDING-MISSING-IMAGE:   spaced.png   :END-BRANDING-MISSING-IMAGE\n"
     )
     result = compile_pdf(SECRET_TEX, tmp_path / "q.pdf", runner=FakeTectonic(log=log))
     assert result.missing_images == ("example-logo.png", "not_there_a.jpeg", "spaced.png")
+
+
+def test_a_missing_name_wrapped_across_log_lines_is_rejoined(tmp_path):
+    name = f"{LONG_NAME[:-4]}-{LONG_NAME}"
+    wrapped = wrap(marker(name))
+    assert len(wrapped.splitlines()) == 3
+    log = f"noise\n{wrapped}\nlater noise\n{marker('after.png')}\n"
+
+    result = compile_pdf(SECRET_TEX, tmp_path / "q.pdf", runner=FakeTectonic(log=log))
+
+    assert result.missing_images == (name, "after.png")
+
+
+def test_a_name_without_the_end_token_keeps_what_was_collected(tmp_path):
+    log = "BRANDING-MISSING-IMAGE: cut-off-na\nme.png\n"
+
+    result = compile_pdf(SECRET_TEX, tmp_path / "q.pdf", runner=FakeTectonic(log=log))
+
+    assert result.missing_images == ("cut-off-name.png",)
 
 
 def test_existing_output_is_refused_before_compiling(tmp_path):
@@ -116,22 +148,40 @@ def test_force_overwrites_an_existing_output(tmp_path):
     assert target.read_bytes() == PDF_BYTES
 
 
-def test_a_missing_binary_says_how_to_install_it(tmp_path):
-    fake = FakeTectonic(raises=FileNotFoundError("tectonic"))
+def test_a_missing_binary_says_how_to_install_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(pdf_module.shutil, "which", lambda _name: None)
+    original = FileNotFoundError("tectonic")
+    fake = FakeTectonic(raises=original)
 
-    with pytest.raises(TectonicNotFound, match="brew install tectonic"):
+    with pytest.raises(TectonicNotFound, match="brew install tectonic") as info:
         compile_pdf(SECRET_TEX, tmp_path / "q.pdf", runner=fake)
 
+    assert info.value.__cause__ is original
     assert not (tmp_path / "q.pdf").exists()
 
 
+def test_a_file_not_found_with_the_binary_present_is_not_reported_as_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(pdf_module.shutil, "which", lambda _name: "/usr/bin/tectonic")
+    original = FileNotFoundError(2, "No such file or directory")
+    fake = FakeTectonic(raises=original)
+
+    with pytest.raises(PdfCompilationError) as info:
+        compile_pdf(SECRET_TEX, tmp_path / "q.pdf", runner=fake)
+
+    assert not isinstance(info.value, TectonicNotFound)
+    assert "could not start tectonic" in str(info.value)
+    assert info.value.__cause__ is original
+
+
 def test_a_timeout_is_reported(tmp_path):
-    fake = FakeTectonic(raises=subprocess.TimeoutExpired("tectonic", 3))
+    original = subprocess.TimeoutExpired("tectonic", 3)
+    fake = FakeTectonic(raises=original)
 
     with pytest.raises(TectonicTimedOut) as info:
         compile_pdf(SECRET_TEX, tmp_path / "q.pdf", runner=fake, timeout=3)
 
     assert "3" in str(info.value) and "Secreto" not in str(info.value)
+    assert info.value.__cause__ is original
 
 
 def test_a_failed_compile_carries_the_log_tail_but_not_the_source(tmp_path):
@@ -147,6 +197,19 @@ def test_a_failed_compile_carries_the_log_tail_but_not_the_source(tmp_path):
     assert len(error.log_tail.splitlines()) <= 40
     assert "Secreto" not in error.log_tail and "Secreto" not in str(error)
     assert not fake.outdir.exists() and not (tmp_path / "q.pdf").exists()
+
+
+def test_the_error_message_never_holds_document_text_even_when_the_log_does(tmp_path):
+    # LaTeX echoes source lines into the log, so log_tail may hold document text. The message
+    # (what a traceback or a log line shows) must not. No RED applies: this pins existing behavior.
+    log = "! Undefined control sequence.\nl.7 Cliente Secreto\n"
+    fake = FakeTectonic(log=log, returncode=1, pdf=None)
+
+    with pytest.raises(TectonicFailed) as info:
+        compile_pdf(SECRET_TEX, tmp_path / "q.pdf", runner=fake)
+
+    assert "Secreto" not in str(info.value)
+    assert "Secreto" in info.value.log_tail
 
 
 def test_a_failed_compile_without_a_log_falls_back_to_stderr(tmp_path):
@@ -220,3 +283,24 @@ def test_a_real_quote_compiles_and_reports_the_missing_company_images(tmp_path):
     assert result.path == target
     assert "example-logo.png" in result.missing_images
     assert "example-certificate.png" in result.missing_images
+
+
+@needs_tectonic
+def test_a_long_missing_image_name_is_reported_intact(tmp_path):
+    company = f"\\input{{{EXAMPLE_COMPANY_PATH.as_posix()}}}"
+    style = f"\\input{{{STYLE_PATH.as_posix()}}}"
+    tex = "\n".join(
+        [
+            r"\documentclass[11pt,a4paper]{article}",
+            company,
+            rf"\renewcommand{{\CoVehicleFileA}}{{{LONG_NAME}}}",
+            style,
+            r"\begin{document}",
+            r"\safeimg{\CoVehicleFileA}{2cm}",
+            r"\end{document}",
+        ]
+    )
+
+    result = compile_pdf(tex, tmp_path / "long.pdf", timeout=300)
+
+    assert LONG_NAME in result.missing_images
