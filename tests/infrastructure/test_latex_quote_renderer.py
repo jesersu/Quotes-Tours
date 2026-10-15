@@ -14,7 +14,7 @@ from quotes.application.quote import (
     RequestedItem,
     build_quote,
 )
-from quotes.application.quote_rendering import QuoteDocument, QuoteRenderer
+from quotes.application.quote_rendering import Language, QuoteDocument, QuoteRenderer
 from quotes.domain.catalog import CatalogItem, PricingUnit
 from quotes.domain.local_payment import LocalPaymentInfo, LocalPrice, VisitorCategory
 from quotes.domain.money import Currency, Money
@@ -22,6 +22,7 @@ from quotes.domain.pricing import PricingPolicy
 from quotes.domain.travelers import Travelers
 from quotes.infrastructure.latex import EXAMPLE_COMPANY_PATH, STYLE_PATH
 from quotes.infrastructure.latex.escaping import format_money
+from quotes.infrastructure.latex.pdf import compile_pdf
 from quotes.infrastructure.latex.quote_renderer import LatexQuoteRenderer
 
 needs_tectonic = pytest.mark.skipif(
@@ -295,7 +296,8 @@ def bare_forms(money: Money) -> set[str]:
     return forms
 
 
-def test_only_total_and_per_adult_prices_reach_the_document():
+@pytest.mark.parametrize("language", list(Language))
+def test_only_total_and_per_adult_prices_reach_the_document(language):
     entries = [
         entry("van", PricingUnit.PER_GROUP, "1234.56"),
         entry("hotel", PricingUnit.PER_DAY, "2345.67", category="accommodation"),
@@ -317,7 +319,7 @@ def test_only_total_and_per_adult_prices_reach_the_document():
     policy = PricingPolicy(margin_rate=Decimal("0.37"), fx_rate=Decimal("3.43"))
     quote = build_quote(request, Catalog(entries), policy)
 
-    text = render(quote)
+    text = render(quote, language=language)
 
     breakdowns = [quote.breakdown, quote.extras[0].breakdown]
     forbidden: set[str] = set()
@@ -526,6 +528,384 @@ def test_service_names_are_guarded_against_the_previous_row_break():
 
     assert "\n{}[Opcional] Van & por grupo" in text
     assert "\n{}*Extra & por grupo" in text
+
+
+# --- English ------------------------------------------------------------------
+
+EN = Language.ENGLISH
+
+# Rendered by the Spanish-only renderer before the language switch existed, with a fixed
+# company and style path; the Spanish output must never drift from it.
+SPANISH_GOLDEN = r"""\documentclass[11pt,a4paper]{article}
+\newcommand{\CoLang}{es}
+\input{company.tex}
+\input{style.tex}
+\begin{document}
+\letterhead
+\par\vspace{1em}\noindent{\LARGE\bfseries Cañón del Colca}\par
+\noindent Preparado para: \textbf{Ana Pérez}\par
+\noindent 13 de octubre de 2026\par
+\noindent 2 días, 2 adultos, 1 niño\par
+\sect{Servicios incluidos}
+\noindent
+\begin{tabularx}{\linewidth}{@{}Xl@{}}
+\toprule
+\textbf{Servicio} & \textbf{Base} \\
+\midrule
+\multicolumn{2}{@{}l}{\textbf{Transporte}} \\
+{}Furgoneta \& chofer & por grupo \\
+\addlinespace
+\multicolumn{2}{@{}l}{\textbf{Actividades}} \\
+{}Servicio tour & por persona \\
+\addlinespace
+\multicolumn{2}{@{}l}{\textbf{Alojamiento}} \\
+{}Servicio bed & por día \\
+\addlinespace
+\multicolumn{2}{@{}l}{\textbf{zeta\_x}} \\
+{}Servicio odd & por grupo \\
+\bottomrule
+\end{tabularx}
+\par\medskip
+\noindent
+\begin{tabularx}{\linewidth}{@{}Xr@{}}
+Precio total & \textbf{S/ 500.00} \\
+Precio por adulto & \textbf{S/ 250.00} \\
+\addlinespace
+Referencia en dólares, total & US\$ 142.86 \\
+Referencia en dólares, por adulto & US\$ 71.43 \\
+\end{tabularx}
+\sect{Opcionales}
+\par\medskip\noindent\textbf{Globo aerostático}\par
+\noindent
+\begin{tabularx}{\linewidth}{@{}Xl@{}}
+\toprule
+\textbf{Servicio} & \textbf{Base} \\
+\midrule
+{}Servicio balloon & por persona \\
+\bottomrule
+\end{tabularx}
+\noindent
+\begin{tabularx}{\linewidth}{@{}Xr@{}}
+Precio total & \textbf{S/ 1,248.75} \\
+Precio por adulto & \textbf{S/ 624.38} \\
+\addlinespace
+Referencia en dólares, total & US\$ 356.79 \\
+Referencia en dólares, por adulto & US\$ 178.40 \\
+\end{tabularx}
+\notebox{Los servicios opcionales no están incluidos en el total anterior; se cotizan por separado.}
+\sect{Pagos en destino}
+\par\medskip\noindent\textbf{Boleto turístico}\par
+\noindent
+\begin{tabularx}{\linewidth}{@{}Xr@{}}
+Adulto latinoamericano & S/ 31.00 \\
+Adulto extranjero & S/ 71.00 \\
+Niño de 6 a 15 años & S/ 11.00 \\
+\end{tabularx}
+\notebox{Estos importes se pagan directamente en destino y no forman parte del total.}
+\sect{Nuestras credenciales}
+\credentials
+\signature{Equipo de ventas}
+\end{document}"""
+
+
+def golden_document() -> QuoteDocument:
+    entries = [
+        entry("van", price="100.00", name_es="Furgoneta & chofer"),
+        entry("tour", PricingUnit.PER_PERSON, "50.00", category="activity", child="30.00"),
+        entry("bed", PricingUnit.PER_DAY, "80.00", category="accommodation"),
+        entry("odd", category="zeta_x"),
+        entry("balloon", PricingUnit.PER_PERSON, "333.00", category="activity"),
+    ]
+    quote = quote_of(
+        entries,
+        ["van", "tour", "bed", "odd"],
+        travelers=Travelers(2, (7,)),
+        extras=(RequestedExtra("Globo aerostático", (RequestedItem("balloon"),)),),
+        local=[local_entry("ticket")],
+    )
+    return doc_of(quote)
+
+
+def test_spanish_output_is_byte_for_byte_the_frozen_golden():
+    golden_renderer = LatexQuoteRenderer(Path("company.tex"), style_path=Path("style.tex"))
+
+    assert golden_renderer.render(golden_document()) == SPANISH_GOLDEN + "\n"
+
+
+def test_explicit_spanish_equals_the_default():
+    quote = simple_quote()
+
+    assert render(quote, language=Language.SPANISH) == render(quote)
+
+
+def full_quote() -> Quote:
+    entries = [
+        entry("van", category="transport"),
+        entry("transfer", category="transfer"),
+        entry("guide", category="guide"),
+        entry("tour", PricingUnit.PER_PERSON, category="activity", child="5.00"),
+        entry("meal", category="meal"),
+        entry("gate", category="entrance"),
+        entry("bed", PricingUnit.PER_DAY, category="accommodation"),
+        entry("misc", category="other"),
+        entry("odd", category="zeta_x"),
+        entry("balloon", PricingUnit.PER_PERSON, "333.00", category="activity"),
+    ]
+    return quote_of(
+        entries,
+        ["van", "transfer", "guide", "tour", "meal", "gate", "bed", "misc", "odd"],
+        travelers=Travelers(2, (7,)),
+        extras=(RequestedExtra("Globo aerostático", (RequestedItem("balloon"),)),),
+        local=[local_entry("ticket")],
+    )
+
+
+def english(quote: Quote | None = None, **overrides) -> str:
+    return render(quote or full_quote(), language=EN, **overrides)
+
+
+SPANISH_FIXED_TEXTS = [
+    "Preparado para",
+    "Servicios incluidos",
+    "Opcionales",
+    "Pagos en destino",
+    "Nuestras credenciales",
+    "Servicio",
+    "Base}",
+    "por grupo",
+    "por día",
+    "por persona",
+    "por unidad",
+    "Precio",
+    "Referencia en dólares",
+    "Adulto latinoamericano",
+    "Adulto extranjero",
+    "Niño",
+    "niño",
+    "adulto",
+    "día",
+    "Los servicios opcionales",
+    "Estos importes",
+    "directamente en destino",
+    "Transporte",
+    "Traslados",
+    "Guiado",
+    "Actividades",
+    "Alimentación",
+    "Entradas",
+    "Alojamiento",
+    "Otros",
+    " de octubre de ",
+]
+
+
+def test_english_preamble_declares_english_before_the_style():
+    text = english()
+
+    assert "\\newcommand{\\CoLang}{en}" in text
+    assert "\\newcommand{\\CoLang}{es}" not in text
+    assert text.index("\\CoLang") < text.index(f"\\input{{{STYLE_PATH.as_posix()}}}")
+
+
+def test_english_fixed_texts_appear():
+    text = english()
+
+    for fixed in [
+        "Prepared for: ",
+        "\\sect{Included services}",
+        "\\sect{Optional extras}",
+        "\\sect{Paid on site}",
+        "\\sect{Our credentials}",
+        "\\textbf{Service} & \\textbf{Basis}",
+        "Total price & ",
+        "Price per adult & ",
+        "US dollar reference, total & ",
+        "US dollar reference, per adult & ",
+        "Latin American adult & ",
+        "Foreign adult & ",
+        "Child aged 6 to 15 & ",
+        "\\notebox{Optional extras are not included in the total above; "
+        "they are quoted separately.}",
+        "\\notebox{These amounts are paid directly on site and are not part of the total.}",
+    ]:
+        assert fixed in text, fixed
+
+
+def test_no_spanish_fixed_text_reaches_an_english_document():
+    text = english()
+
+    for fixed in SPANISH_FIXED_TEXTS:
+        assert fixed not in text, fixed
+
+
+def test_english_categories_use_english_headings_in_the_fixed_order():
+    text = english()
+
+    headings = [
+        "Transport",
+        "Transfers",
+        "Guiding",
+        "Activities",
+        "Meals",
+        "Entrance fees",
+        "Accommodation",
+        "Other",
+    ]
+    positions = [text.index(f"\\textbf{{{h}}}") for h in headings]
+    assert positions == sorted(positions)
+    assert text.index("\\textbf{Other}") < text.index("\\textbf{zeta\\_x}")
+
+
+@pytest.mark.parametrize(
+    ("unit", "basis"),
+    [
+        (PricingUnit.PER_GROUP, "per group"),
+        (PricingUnit.PER_DAY, "per day"),
+        (PricingUnit.PER_PERSON, "per person"),
+        (PricingUnit.PER_UNIT, "per unit"),
+    ],
+)
+def test_english_basis_text_for_each_unit(unit, basis):
+    request = QuoteRequest(2, Travelers(2), (RequestedItem("x", quantity=2),))
+    quote = build_quote(request, Catalog([entry("x", unit)]), POLICY)
+
+    assert f"& {basis} \\\\" in render(quote, language=EN)
+
+
+def test_english_names_are_used_for_services_and_local_payments():
+    quote = quote_of([entry("van", name_es="Furgoneta")], local=[local_entry("ticket", "Boleto")])
+    text = render(quote, language=EN)
+
+    assert "Service van" in text
+    assert "Furgoneta" not in text
+    assert "\\textbf{Tourist ticket}" in text
+    assert "Boleto" not in text
+
+
+def test_english_extra_labels_client_title_and_signer_are_printed_as_given():
+    text = english(client_name="Ana Pérez", title="Cañón del Colca", signed_by="Equipo de ventas")
+
+    for given in ["Globo aerostático", "Ana Pérez", "Cañón del Colca", "Equipo de ventas"]:
+        assert given in text
+
+
+@pytest.mark.parametrize(
+    ("day", "expected"),
+    [
+        (date(2026, 1, 1), "1 January 2026"),
+        (date(2026, 10, 14), "14 October 2026"),
+        (date(2027, 3, 9), "9 March 2027"),
+        (date(2026, 12, 31), "31 December 2026"),
+    ],
+)
+def test_date_is_written_out_in_english(day, expected):
+    assert f"\\noindent {expected}\\par" in english(simple_quote(), issued_on=day)
+
+
+@pytest.mark.parametrize(
+    ("days", "travelers", "summary"),
+    [
+        (1, Travelers(1), "1 day, 1 adult"),
+        (2, Travelers(3), "2 days, 3 adults"),
+        (3, Travelers(2, (7,)), "3 days, 2 adults, 1 child"),
+        (3, Travelers(2, (7, 9)), "3 days, 2 adults, 2 children"),
+    ],
+)
+def test_english_trip_summary_handles_singular_plural_and_children(days, travelers, summary):
+    text = english(simple_quote(days=days, travelers=travelers))
+
+    assert f"\\noindent {summary}\\par" in text
+
+
+def test_english_children_are_not_mentioned_when_there_are_none():
+    assert "child" not in english(simple_quote())
+
+
+def test_english_optional_and_local_sections_are_absent_without_entries():
+    text = english(simple_quote())
+
+    assert "Optional extras" not in text
+    assert "Paid on site" not in text
+
+
+def test_every_visitor_category_has_an_english_label_and_a_row():
+    categories = list(VisitorCategory)
+    info = LocalPaymentInfo(
+        "Tourist ticket",
+        tuple(LocalPrice(c, pen(f"{10 + i}.00")) for i, c in enumerate(categories)),
+    )
+    local = LocalPaymentEntry("ticket", info, "Boleto turístico", "Tourist ticket")
+
+    text = render(quote_of([entry("van")], local=[local]), language=EN)
+
+    section = text[text.index("\\sect{Paid on site}") :]
+    rows = [
+        line for line in section.splitlines() if "S/ " in line and line.rstrip().endswith("\\\\")
+    ]
+    assert len(rows) == len(categories)
+    for row in rows:
+        assert not row.startswith("S/ ")
+
+
+def test_an_unlabeled_visitor_category_fails_in_english_too():
+    info = LocalPaymentInfo(
+        "Tourist ticket",
+        (
+            LocalPrice(VisitorCategory.FOREIGN_ADULT, pen("71.00")),
+            LocalPrice("resident_adult", pen("21.00")),
+        ),
+    )
+    local = LocalPaymentEntry("ticket", info, "Boleto turístico", "Tourist ticket")
+    quote = quote_of([entry("van")], local=[local])
+
+    with pytest.raises(ValueError, match="resident_adult"):
+        render(quote, language=EN)
+
+
+def test_english_values_are_escaped():
+    text = render(
+        nasty_quote(),
+        language=EN,
+        client_name=f"Cliente {NASTY}",
+        title=f"Título {NASTY}",
+        signed_by=f"Firma {NASTY}",
+    )
+
+    assert NASTY not in text
+    assert f"Cliente {NASTY_ESCAPED}" in text
+    assert f"Label {NASTY_ESCAPED}" in text
+    assert "Service van" in text  # service names come from name_en, not the nasty name_es
+    assert "cat\\_1" in text
+
+
+@needs_tectonic
+def test_full_english_quote_compiles_to_a_pdf(tmp_path):
+    entries = [
+        entry("van", price="100.00", name_es=f"Van {NASTY}"),
+        entry("tour", PricingUnit.PER_PERSON, "50.00", category="activity", child="30.00"),
+        entry("bed", PricingUnit.PER_DAY, "80.00", category="accommodation"),
+        entry("odd", category="cat_1&x"),
+        entry("balloon", PricingUnit.PER_PERSON, "333.00", category="activity"),
+    ]
+    quote = quote_of(
+        entries,
+        ["van", "tour", "bed", "odd"],
+        travelers=Travelers(2, (7,)),
+        extras=(RequestedExtra(f"Globo {NASTY}", (RequestedItem("balloon"),)),),
+        local=[local_entry("ticket", name_es=f"Ticket {NASTY}")],
+    )
+    text = render(
+        quote,
+        language=EN,
+        client_name=f"Cliente {NASTY}",
+        title=f"Título {NASTY}",
+        signed_by=f"Firma {NASTY}",
+    )
+    out = tmp_path / "quote-en.pdf"
+
+    compile_pdf(text, out)
+
+    assert out.stat().st_size > 0
 
 
 # --- real compile -----------------------------------------------------------

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 from quotes.application.quote import Quote
@@ -19,6 +20,13 @@ def _require_text(label: str, value: object) -> str:
     return value.strip()
 
 
+class Language(StrEnum):
+    """The language a document is written in; the value is its ISO 639-1 code."""
+
+    SPANISH = "es"
+    ENGLISH = "en"
+
+
 @dataclass(frozen=True)
 class QuoteDocument:
     """A priced quote plus the wording around it: who it is for, its title, date and signer."""
@@ -28,6 +36,7 @@ class QuoteDocument:
     title: str
     issued_on: datetime.date
     signed_by: str
+    language: Language = Language.SPANISH
 
     def __post_init__(self) -> None:
         if not isinstance(self.quote, Quote):
@@ -40,6 +49,11 @@ class QuoteDocument:
             self.issued_on, datetime.datetime
         ):
             raise InvalidPricingInput("Issue date must be a date, not a datetime")
+        try:
+            language = Language(self.language)
+        except ValueError:
+            raise InvalidPricingInput("Language must be a known language") from None
+        object.__setattr__(self, "language", language)
 
 
 @runtime_checkable
