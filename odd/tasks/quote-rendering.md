@@ -12,10 +12,13 @@ Turn a hand-written quote request into a branded PDF: look the items up in the c
 - 2026-10-08, owner: the branding template is split. Layout and macros are public; company identity (RUC, phones, address, founder, certificate) and images stay out of the repository under `data/private/branding/`. Tests use an invented company, the same way they use invented prices.
 - Source template: `docs/branding/colcastar.tex` in the private colcaStarTours checkout. It is read-only for this work and is not modified.
 - Comments in the public style file are in English, following this repository's convention.
+- 2026-10-09, owner: the rendered quote shows only the total and the per-adult price, never a price per service. The price table lists the services grouped by catalog category with their basis (per vehicle, per day, per person) and no amount per row. Reason: the engine applies the margin to the full subtotal, and the only per-line value is the cost, which the client must not see.
+- 2026-10-12, owner: the day-by-day itinerary text is part of the product (the README states "itineraries with options and prices") and gets its own tasks, T7 to T9, after T6. They are the foundation the Phase 4 planner needs.
+- Itinerary text sources, recommended and accepted in principle: base descriptions stored per catalog item, written by the owner, with the LLM used later only to join them into fluent text. Facts never come from the LLM, the same rule already applied to prices.
 - Delivery strategy: `ask-on-risk`, chain strategy `stacked-to-main` (numbered branches merged to `main`, as in phases 1 and 2). Inferred from the repository history; the owner can change it.
 
 ## Scope
-- T1 and T2 are authorized (T2 on 2026-10-08). T3 to T6 are planned and wait for the owner's go-ahead.
+- T1 and T2 are done and merged. T3 to T9 are planned; each waits for the owner's go-ahead.
 
 ## Constraints
 - Public repository: no real prices, margins, supplier data, company identity or company images are committed.
@@ -29,15 +32,22 @@ Turn a hand-written quote request into a branded PDF: look the items up in the c
 ## Tasks
 - [x] T1 — Branding split: public style file, public example company, private company data and images. Route: inline (one non-trivial file, the test; the rest is a mechanical port of the existing template). Evidence: RED (`ModuleNotFoundError: quotes.infrastructure.latex`) then GREEN 6 passed in `tests/infrastructure/test_latex_branding.py`, including the `tectonic` compile in Spanish and English; full suite 292 passed, 16 skipped; `ruff check` and `ruff format --check` clean. Checked by eye: a sample document compiles to 2 pages with the example company (placeholder boxes) and with the private company data and its 4 images; extracted text keeps `¿ ¡ ñ ü`. Changes from the source template: company data removed, a guard that fails when the company file is not loaded first, `\ifdraft` defaults to final when undeclared, a Unicode font (TeX Gyre Heros) under XeTeX/LuaTeX because the pdfLaTeX font setup misplaces `¿` and `¡` there, and the logo falls back to a placeholder box like the other images.
 - [x] T2 — `QuoteRequest` and the `build_quote` use case (catalog lookup, lines, `price_quote`). Route: delegated writer (two non-trivial files; the reading that prepares the write went with it). Files: `src/quotes/application/quote.py` (154 lines), `tests/application/test_quote.py` (320 lines); about 474 lines, over the 400-line heuristic because the tests were kept in full. Evidence, writer: RED (`ModuleNotFoundError: quotes.application.quote`) then GREEN 43 passed; full suite 340 passed, 16 skipped; ruff clean. Parent: structural readback of `quote.py` (no money arithmetic outside the domain; only the two allowed files changed) and spot check re-running the full suite, `ruff check` and `ruff format --check` with the same results. Contract for the next tasks: `RequestedItem(item_id, days=None, quantity=None)`, `RequestedExtra(label, items)`, `QuoteRequest(days, travelers, items, extras=(), paid_locally=())`, `QuotedLine(entry, line)`, `QuotedExtra(label, lines, breakdown)`, `Quote(request, lines, breakdown, extras, paid_locally)`, `build_quote(request, catalog, policy)`. Notes: per-item `days` overrides the request's; duplicate `paid_locally` ids are rejected in the request because `price_quote` does not check them; duplicate extra labels and a `PER_UNIT` item without quantity are rejected by the domain when `build_quote` runs.
-- [ ] T3 — `QuoteRenderer` port and LaTeX adapter in Spanish (escaping, money format, price table). Not yet authorized.
+- [ ] T3 — `QuoteRenderer` port and LaTeX adapter in Spanish: letterhead, price table (services by category with their basis, no amount per row), total and per-adult price, optional extras, paid-locally information, credentials and signature; LaTeX escaping and money format. Produces the `.tex` only. Hand-written narrative sections are out of scope. Not yet authorized.
 - [ ] T4 — PDF compilation with `tectonic`. Not yet authorized.
 - [ ] T5 — English output. Not yet authorized.
-- [ ] T6 — `quotes quote build <request.yaml>` CLI command. Not yet authorized.
+- [ ] T6 — `quotes quote build <request.yaml>` CLI command. Reads the request from YAML; the reader accepts only lists for collections (closes the open advisory about sets and dicts). Not yet authorized.
+
+### Itinerary foundations (added 2026-10-12)
+- [ ] T7 — Several options in one quote. `QuoteRequest` carries a list of options, each with its own items and its own total, priced separately with the same `price_quote`; rendered with `\opthead`. Case from a real quote: "Option 1" ends in Puno, "Option 2" returns to Arequipa. No change to the pricing engine. Not yet authorized.
+- [ ] T8 — Items assigned to days. A requested item says on which day or days it happens, so a day-by-day itinerary can be built; today it only says for how many days it runs. Open design question: how this coexists with the per-item `days` used for pricing. Not yet authorized.
+- [ ] T9 — Region and descriptions in the catalog. New columns on `quotes.pricing_items` (region; description in Spanish and English), read by the catalog adapter and exposed on `CatalogEntry`. The schema is owned by the colcaStarTours repository: the migration goes there first, then the vendored copy here. Lets the system filter "everything in Puno" and gives the itinerary its base text. Not yet authorized.
 
 ## Acceptance criteria
 - T1: the style file defines no company data; the example company defines every field the style uses; a minimal document compiles to PDF in Spanish and English with the example company.
 
 ## Open questions
+- T7 to T9 order: T9 needs a schema migration applied by the owner, so it can run in parallel with T7 and T8.
+- Whether the day-by-day text is rendered from the catalog descriptions alone before Phase 4 exists, or waits for the planner. Not decided.
 - The price table has no macro in the template. Its layout lives in each hand-written quote and has to be read from one (they contain real prices) before T3.
 
 ## Progress
@@ -67,9 +77,12 @@ Turn a hand-written quote request into a branded PDF: look the items up in the c
 - Follow-up commit `fix(application): match extras by label and reject non-list collections`, at the owner's request, addresses the warning and the first suggestion. Extras are now matched to their breakdown by label; a test with two extras passes even when the pricing function returns them reversed (RED with positional pairing, then GREEN). `items`, `extras` and `paid_locally` given as `None`, a number or text raise `InvalidPricingInput` (RED: 8 cases raised `TypeError`; GREEN). Evidence: 61 passed in `tests/application/test_quote.py`; full suite 358 passed, 16 skipped; ruff clean. The third suggestion is not addressed.
 - Range main..15c9576 (the branch with that follow-up, 3 files, 551 lines): consent granted by owner; reliability lens APPROVED; acknowledged (lineage review-3df975b41cacd9f8). Advisory, non-blocking: W the label-keyed lookup assumed the domain returns labels unchanged; S sets and dicts are accepted as collections, giving an unstable line order; S an explicit quantity on a non-`PER_UNIT` item and a non-text local payment id are untested; S the T2 task line carried stale figures.
 - The warning was verified by the parent and was a defect introduced by the previous follow-up: `price_optional_extras` trims labels, so a label with surrounding spaces raised `KeyError`. Commit `fix(application): trim extra labels so they match the domain`: `RequestedExtra` now stores the trimmed label. RED (`KeyError: '  Upgrade '`) then GREEN. Current figures for T2: `quote.py` 168 lines, `test_quote.py` 383 lines, 62 tests; full suite 359 passed, 16 skipped; ruff clean. The two remaining suggestions are not addressed.
+- Range main..9b707b9 (the branch with that fix, 3 files, 564 lines): consent granted by owner; reliability lens APPROVED; acknowledged (lineage review-abec4417f62dba58). Merged as PR #8 (456c296). Advisory, non-blocking, none addressed: S sets and dicts are accepted as collections (to be closed in T6); S an explicit quantity on a non-`PER_UNIT` item and a non-text local payment id are untested; S the trimmed-label test does not assert the breakdown.
 - Not addressed (owner's call): the pdfLaTeX font branch is not compiled anywhere (no pdfLaTeX on this machine or in CI); CI still runs only the regex tests because it has no `tectonic`; the three suggestions and the `\CoLang` one.
 
 - T2 done on branch `feat/render-02-build-quote` (from main 248ee14).
 
 ## Next step
-Before T3, read the price table layout from a hand-written quote; then owner go-ahead for T3. Before T3, read the price table layout from a hand-written quote.
+Owner go-ahead for T3. The price table layout was read from a hand-written quote on 2026-10-09: three columns (service, basis, price) grouped by category; under the total-only decision the price column is dropped.
+
+After Phase 3: Phase 4 (LLM planner that turns free text into a `QuoteRequest` and writes the day text from catalog descriptions), RAG only if the planner shows a need, then the server.
