@@ -1,0 +1,26 @@
+# Example quote request with invented values. Real requests go in data/private/quotes/
+# (git-ignored). Build one with: quotes quote build <request.yaml>
+client: Smith family
+title: Colca Canyon, 2 days
+language: en            # es (default) or en
+date: 2026-10-14        # optional; default is today
+signed_by: Sales team
+days: 2
+travelers:
+  adults: 2
+  child_ages: [8]       # optional
+pricing:
+  margin_rate: "0.25"   # required; a plain YAML number is read as text too, never as a float
+  fx_rate: "3.5"        # optional, default 3.5
+  usd_rounding_step: "5"  # optional, default none
+items:
+  - id: van
+  - id: guide
+    days: 1             # optional, overrides the request days for this item
+  - id: bus-seat
+    quantity: 3         # optional, for per-unit items
+extras:                 # optional
+  - label: Horseback ride
+    items:
+      - id: horse
+paid_locally: [colca-ticket]   # optional

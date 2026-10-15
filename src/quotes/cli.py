@@ -1,10 +1,11 @@
-"""Command-line entry point: ``quotes catalog check|draft|sql``."""
+"""Command-line entry point: ``quotes catalog check|draft|sql`` and ``quotes quote build``."""
 
 from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from datetime import date
 from pathlib import Path
 from typing import TextIO
 
@@ -12,11 +13,22 @@ import psycopg
 
 from quotes.application.catalog import CatalogLoad, CatalogRepository
 from quotes.application.catalog_proposal import propose_catalog
+from quotes.application.quote import build_quote
+from quotes.application.quote_rendering import QuoteDocument
+from quotes.domain.errors import DomainError
 from quotes.infrastructure.catalog_draft import dump_draft, load_draft, validate_draft
 from quotes.infrastructure.catalog_sql import SqlLiteralError, render_sql
 from quotes.infrastructure.excel_price_sheet import DEFAULT_SHEET, SheetError, read_price_rows
+from quotes.infrastructure.latex.pdf import (
+    PdfCompilationError,
+    PdfResult,
+    TectonicFailed,
+    compile_pdf,
+)
+from quotes.infrastructure.latex.quote_renderer import LatexQuoteRenderer
 from quotes.infrastructure.output_file import OutputExists, write_new_file
 from quotes.infrastructure.postgres_catalog import PostgresCatalogRepository
+from quotes.infrastructure.quote_request_file import InvalidRequestFile, read_quote_request
 from quotes.infrastructure.settings import MissingSetting, database_url
 
 EXIT_OK = 0
@@ -24,6 +36,9 @@ EXIT_CATALOG_ERRORS = 1
 EXIT_UNAVAILABLE = 2  # configuration, connection or file problem
 DEFAULT_DRAFT = Path("data/private/catalog-draft.yaml")
 DEFAULT_SQL = Path("data/private/catalog-import.sql")
+DEFAULT_QUOTES_DIR = Path("data/private/quotes")
+DEFAULT_COMPANY = Path("data/private/branding/company.tex")
+DEFAULT_ASSETS = Path("data/private/branding/assets")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -45,6 +60,16 @@ def _parser() -> argparse.ArgumentParser:
     sql.add_argument("draft", type=Path)
     sql.add_argument("-o", "--output", type=Path, default=DEFAULT_SQL)
     sql.add_argument("--force", action="store_true", help="overwrite an existing output file")
+    quote = commands.add_parser("quote", help="quote commands")
+    quote_commands = quote.add_subparsers(dest="quote_command", required=True)
+    build = quote_commands.add_parser("build", help="build a branded PDF from a request file")
+    build.add_argument("request", type=Path)
+    build.add_argument(
+        "-o", "--output", type=Path, help=f"default: {DEFAULT_QUOTES_DIR}/<request name>.pdf"
+    )
+    build.add_argument("--force", action="store_true", help="overwrite an existing output file")
+    build.add_argument("--company", type=Path, default=DEFAULT_COMPANY, help="company .tex file")
+    build.add_argument("--assets", type=Path, default=DEFAULT_ASSETS, help="brand images folder")
     return parser
 
 
@@ -126,30 +151,17 @@ def _sql(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     return EXIT_OK
 
 
-def main(
-    argv: Sequence[str] | None = None,
-    *,
-    repository: CatalogRepository | None = None,
-    env: Mapping[str, str] | None = None,
-    out: TextIO | None = None,
-    err: TextIO | None = None,
-) -> int:
-    args = _parser().parse_args(argv)
-    out = sys.stdout if out is None else out
-    err = sys.stderr if err is None else err
-    if args.catalog_command == "draft":
-        return _draft(args, out, err)
-    if args.catalog_command == "sql":
-        return _sql(args, out, err)
-    assert args.catalog_command == "check"
+def _load_catalog(
+    repository: CatalogRepository | None, env: Mapping[str, str] | None, err: TextIO
+) -> CatalogLoad | None:
+    """Load the catalog, or print the error and return None (callers exit with 2)."""
     try:
         repo = (
             repository if repository is not None else PostgresCatalogRepository(database_url(env))
         )
-        loaded = repo.load()
+        return repo.load()
     except MissingSetting as exc:
         print(f"error: {exc}", file=err)
-        return EXIT_UNAVAILABLE
     except psycopg.Error as exc:
         # Never echo the driver message: it can contain parts of the connection string.
         print(
@@ -157,6 +169,119 @@ def main(
             "check DATABASE_URL, network access and role permissions.",
             file=err,
         )
+    return None
+
+
+def _quote_build(
+    args: argparse.Namespace,
+    repository: CatalogRepository | None,
+    env: Mapping[str, str] | None,
+    out: TextIO,
+    err: TextIO,
+    today: Callable[[], date],
+    compile_: Callable[..., PdfResult],
+) -> int:
+    try:
+        wanted = read_quote_request(args.request)
+    except InvalidRequestFile as exc:
+        print(f"error: {args.request} cannot be used:", file=err)
+        for problem in exc.problems:
+            print(f"  - {problem}", file=err)
+        return EXIT_UNAVAILABLE
+    # LaTeX reads these through \input{} from a temporary folder, so they must be absolute.
+    company = args.company.resolve()
+    if not company.is_file():
+        print(f"error: company file not found: {args.company}", file=err)
+        return EXIT_UNAVAILABLE
+    assets = args.assets.resolve()
+    output = args.output or DEFAULT_QUOTES_DIR / f"{args.request.stem}.pdf"
+    loaded = _load_catalog(repository, env, err)
+    if loaded is None:
+        return EXIT_UNAVAILABLE
+    try:
+        quote = build_quote(wanted.request, loaded.catalog, wanted.policy)
+        document = QuoteDocument(
+            quote,
+            wanted.client_name,
+            wanted.title,
+            wanted.issued_on or today(),
+            wanted.signed_by,
+            wanted.language,
+        )
+        renderer = LatexQuoteRenderer(company, assets_dir=assets if assets.is_dir() else None)
+        tex = renderer.render(document)
+    except DomainError as exc:
+        print(f"error: {exc}", file=err)
+        return EXIT_UNAVAILABLE
+    except ValueError as exc:
+        print(f"error: {exc}", file=err)
+        return EXIT_UNAVAILABLE
+    try:
+        result = compile_(tex, output, force=args.force)
+    except OutputExists as exc:
+        print(f"error: {exc}", file=err)
+        return EXIT_UNAVAILABLE
+    except TectonicFailed as exc:
+        print(f"error: {exc}", file=err)
+        # The log can echo document text (client names); this is the operator's own terminal.
+        print("LaTeX log (may contain document text):", file=err)
+        print(exc.log_tail, file=err)
+        return EXIT_UNAVAILABLE
+    except PdfCompilationError as exc:
+        print(f"error: {exc}", file=err)
+        return EXIT_UNAVAILABLE
+    except OSError as exc:
+        print(f"error: cannot write {output} ({type(exc).__name__})", file=err)
+        return EXIT_UNAVAILABLE
+    if loaded.issues:
+        print(
+            f"warning: the catalog reported {len(loaded.issues)} issue(s); "
+            "run `quotes catalog check` for details.",
+            file=err,
+        )
+    for name in result.missing_images:
+        print(f"warning: missing image {name}", file=err)
+    if result.missing_images:
+        print("warning: the PDF shows placeholder boxes instead of those images.", file=err)
+    print("Quote built", file=out)
+    print(f"  written to: {result.path}", file=out)
+    print(f"  services: {len(quote.lines)}", file=out)
+    print(f"  optional extras: {len(quote.extras)}", file=out)
+    print(f"  paid locally: {len(quote.paid_locally)}", file=out)
+    print(f"  language: {document.language.value}", file=out)
+    return EXIT_OK
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    repository: CatalogRepository | None = None,
+    env: Mapping[str, str] | None = None,
+    out: TextIO | None = None,
+    err: TextIO | None = None,
+    today: Callable[[], date] | None = None,
+    compile: Callable[..., PdfResult] | None = None,
+) -> int:
+    args = _parser().parse_args(argv)
+    out = sys.stdout if out is None else out
+    err = sys.stderr if err is None else err
+    if args.command == "quote":
+        return _quote_build(
+            args,
+            repository,
+            env,
+            out,
+            err,
+            today if today is not None else date.today,
+            compile if compile is not None else compile_pdf,
+        )
+    if args.catalog_command == "draft":
+        return _draft(args, out, err)
+    if args.catalog_command == "sql":
+        return _sql(args, out, err)
+    assert args.catalog_command == "check"
+    loaded = _load_catalog(repository, env, err)
+    if loaded is None:
         return EXIT_UNAVAILABLE
     _report(loaded, out)
     return EXIT_OK if loaded.ok else EXIT_CATALOG_ERRORS

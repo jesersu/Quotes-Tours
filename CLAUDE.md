@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Bilingual (EN/ES) tour quote generator for Colca Star Tours. Target output is LaTeX/PDF itineraries
 with prices. Today the repository holds the pricing domain, the catalog read model with its Postgres
-adapter, and a CLI to audit the catalog and to load prices from the owner's spreadsheet. The LLM
-planner, RAG and LaTeX renderer are not built yet.
+adapter, a CLI to audit the catalog and to load prices from the owner's spreadsheet, and
+`quotes quote build`, which turns a YAML request into a branded PDF (LaTeX renderer, `tectonic`
+compile). The LLM planner and RAG are not built yet.
 
 ## Commands
 
@@ -25,7 +26,11 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/quotes catalog check                                # needs DATABASE_URL
 .venv/bin/quotes catalog draft <prices.xlsx>                  # -> data/private/catalog-draft.yaml
 .venv/bin/quotes catalog sql data/private/catalog-draft.yaml  # -> data/private/catalog-import.sql
+.venv/bin/quotes quote build data/private/quotes/<request>.yaml   # -> data/private/quotes/<request>.pdf
 ```
+
+`quote build` needs `tectonic` (`brew install tectonic`) and `DATABASE_URL`; see
+`examples/quote-request.example.yaml` for the request format.
 
 Load the environment with `set -a; source .env; set +a` (see `.env.example`).
 
@@ -77,7 +82,8 @@ Light hexagonal layout under `src/quotes/`. Dependencies point inward:
   `catalog_proposal.py`. `CatalogEntry` wraps a domain `CatalogItem` with what the future planner
   and renderer need (category, bilingual names, duration); the domain item stays minimal.
 - `infrastructure/` holds the adapters: Postgres catalog, in-memory catalog (tests), Excel reader,
-  YAML draft read/validate, SQL renderer, settings, safe file output.
+  YAML draft read/validate, SQL renderer, quote request file reader, settings, safe file output.
+  `latex/` holds the brand style, the quote renderer and the PDF compile (`tectonic`).
 - `cli.py` is the composition root and owns exit codes: `0` ok (warnings allowed), `1` catalog
   errors, `2` configuration, connection or file problem.
 
