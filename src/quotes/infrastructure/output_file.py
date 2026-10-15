@@ -13,7 +13,17 @@ class OutputExists(Exception):
 
 
 def write_new_file(path: Path, text: str, *, force: bool) -> None:
-    """Write ``text`` to ``path`` atomically with mode 0o600.
+    """Write ``text`` (UTF-8) to ``path`` atomically with mode 0o600; see ``_write_atomic``."""
+    _write_atomic(path, text.encode("utf-8"), force=force)
+
+
+def write_new_bytes(path: Path, data: bytes, *, force: bool) -> None:
+    """Write ``data`` to ``path`` atomically with mode 0o600; see ``_write_atomic``."""
+    _write_atomic(path, data, force=force)
+
+
+def _write_atomic(path: Path, data: bytes, *, force: bool) -> None:
+    """Write ``data`` to ``path`` atomically with mode 0o600.
 
     The content goes to a temp file in the same directory (``mkstemp`` creates it 0o600), is
     flushed and fsynced, then moved onto the target. Any failure removes the temp file and leaves
@@ -26,8 +36,8 @@ def write_new_file(path: Path, text: str, *, force: bool) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         if force:

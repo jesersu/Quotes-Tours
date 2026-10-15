@@ -135,7 +135,11 @@
 \fancyfoot[L]{\footnotesize\color{brandslate}\CoLegalName\quad RUC \CoRuc}
 \fancyfoot[R]{\footnotesize\color{brandslate}\ifcoEnglish Page\else Página\fi\ \thepage}
 
-% An image that does not break the build when the file is missing.
+% An image that does not break the build when the file is missing. The
+% fallback also writes "BRANDING-MISSING-IMAGE: <name> :END-BRANDING-MISSING-IMAGE"
+% to the log so a caller can tell a final document shipped with placeholder
+% boxes. quotes/infrastructure/latex/pdf.py parses that line; the end token lets
+% it rejoin a name that TeX wrapped across several log lines.
 % Pass ONLY the file name. It looks in the document's own assets/ first
 % and then in \CoAssetsDir. \IfFileExists does NOT honour \graphicspath,
 % so the paths are tried by hand.
@@ -144,7 +148,8 @@
     {\includegraphics[height=#2,keepaspectratio]{assets/#1}}%
     {\IfFileExists{\CoAssetsDir#1}%
       {\includegraphics[height=#2,keepaspectratio]{\CoAssetsDir#1}}%
-      {\fbox{\parbox[c][#2][c]{4cm}{\centering\footnotesize\color{brandslate}missing image:\\\coverbatim{#1}}}}}}
+      {\typeout{BRANDING-MISSING-IMAGE: \expandafter\detokenize\expandafter{#1} :END-BRANDING-MISSING-IMAGE}%
+       \fbox{\parbox[c][#2][c]{4cm}{\centering\footnotesize\color{brandslate}missing image:\\\coverbatim{#1}}}}}}
 
 % Prints a file name or path literally. Names with an underscore or another
 % TeX-special character would otherwise break the build in text mode.
@@ -161,7 +166,8 @@
     {\includegraphics[width=3.1cm]{assets/\CoLogoFile}}%
     {\IfFileExists{\CoAssetsDir\CoLogoFile}%
       {\includegraphics[width=3.1cm]{\CoAssetsDir\CoLogoFile}}%
-      {\fbox{\parbox[c][1.6cm][c]{2.7cm}{\centering\footnotesize\color{brandslate}logo}}}}}
+      {\typeout{BRANDING-MISSING-IMAGE: \expandafter\detokenize\expandafter{\CoLogoFile} :END-BRANDING-MISSING-IMAGE}%
+       \fbox{\parbox[c][1.6cm][c]{2.7cm}{\centering\footnotesize\color{brandslate}logo}}}}}
 
 % Letterhead. Called once, right after the document opens.
 \newcommand{\letterhead}{%

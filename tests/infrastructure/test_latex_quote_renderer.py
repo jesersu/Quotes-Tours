@@ -431,6 +431,26 @@ def test_paid_locally_rows_follow_the_fixed_visitor_order():
     assert "Adulto latinoamericano" not in text
 
 
+def test_every_visitor_category_has_a_spanish_label_and_a_row():
+    # Iterates the enum so a new member without a label in the renderer is caught here.
+    categories = list(VisitorCategory)
+    info = LocalPaymentInfo(
+        "Tourist ticket",
+        tuple(LocalPrice(c, pen(f"{10 + i}.00")) for i, c in enumerate(categories)),
+    )
+    local = LocalPaymentEntry("ticket", info, "Boleto turístico", "Tourist ticket")
+
+    text = render(quote_of([entry("van")], local=[local]))
+
+    section = text[text.index("\\sect{Pagos en destino}") :]
+    for i in range(len(categories)):
+        assert f"S/ {10 + i}.00" in section
+    rows = [
+        line for line in section.splitlines() if "S/ " in line and line.rstrip().endswith("\\\\")
+    ]
+    assert len(rows) == len(categories)
+
+
 def test_a_visitor_category_without_a_label_fails_instead_of_being_dropped():
     # LocalPrice does not check the category type; a value with no Spanish label must not
     # silently disappear from the document the client pays from.

@@ -198,3 +198,53 @@ def test_diagnostics_look_where_the_images_are_actually_loaded_from(tmp_path):
     assert "LOGO=found" in log  # only in the document's own assets/ folder
     assert "CERT=found" in log  # only in the company folder
     assert "VEHICLE=missing" in log
+
+
+MISSING_LINE = "BRANDING-MISSING-IMAGE:"
+END_TOKEN = ":END-BRANDING-MISSING-IMAGE"
+
+
+@needs_tectonic
+def test_missing_image_and_missing_logo_each_leave_a_line_in_the_log(tmp_path):
+    preamble = "\n".join(
+        [
+            COMPANY,
+            r"\renewcommand{\CoVehicleFileA}{not_there_a.jpeg}",
+            STYLE,
+        ]
+    )
+
+    result, log = compile_document(
+        tmp_path, preamble, body=r"\letterhead \safeimg{\CoVehicleFileA}{2cm}"
+    )
+
+    assert_compiled(tmp_path, result)
+    assert f"{MISSING_LINE} example-logo.png {END_TOKEN}" in log
+    assert f"{MISSING_LINE} not_there_a.jpeg {END_TOKEN}" in log  # literal, underscore included
+
+
+@needs_tectonic
+def test_special_characters_in_a_missing_name_are_printed_literally(tmp_path):
+    # Plain-text catcodes, so the name reaches the style as a real "_", "&" and "#".
+    define = r"{\catcode`\_=12 \catcode`\&=12 \catcode`\#=12 \gdef\weird{a_b&c#d.png}}"
+    preamble = "\n".join([COMPANY, STYLE, define])
+
+    result, log = compile_document(tmp_path, preamble, body=r"\safeimg{\weird}{2cm}")
+
+    assert_compiled(tmp_path, result)
+    assert f"{MISSING_LINE} a_b&c#d.png {END_TOKEN}" in log
+
+
+@needs_tectonic
+def test_found_images_leave_no_missing_line(tmp_path):
+    (tmp_path / "assets").mkdir()
+    for name in ("example-logo.png", "example-certificate.png"):
+        (tmp_path / "assets" / name).write_bytes(tiny_png())
+    preamble = "\n".join([COMPANY, STYLE])
+
+    result, log = compile_document(
+        tmp_path, preamble, body=r"\letterhead \safeimg{\CoConstanciaFile}{2cm}"
+    )
+
+    assert_compiled(tmp_path, result)
+    assert MISSING_LINE not in log
