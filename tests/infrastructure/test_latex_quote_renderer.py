@@ -372,6 +372,17 @@ def two_extras_quote() -> Quote:
     return quote_of(entries, ["van"], extras=extras)
 
 
+def test_each_extra_keeps_its_label_services_and_prices_on_one_page():
+    text = render(two_extras_quote())
+
+    for label in ("Globo aerostático", "Spa"):
+        block = text[text.index(f"\\textbf{{{label}}}") :]
+        block = block[: block.index("\\end{tabularx}", block.index("@{}Xr@{}"))]
+        assert block.count("\\nopagebreak") == 2
+        assert "\\textbf{Servicio}" in block.split("\\nopagebreak")[1]
+        assert "@{}Xr@{}" in block.split("\\nopagebreak")[2]
+
+
 def test_optional_section_is_absent_without_extras():
     assert "Opcionales" not in render(simple_quote())
 
@@ -473,11 +484,8 @@ def test_a_visitor_category_without_a_label_fails_instead_of_being_dropped():
 def test_body_ends_with_credentials_and_signature_in_order():
     text = render(simple_quote())
 
-    assert (
-        text.index("\\sect{Nuestras credenciales}")
-        < text.index("\\credentials")
-        < text.index("\\signature{Equipo de ventas}")
-    )
+    credentials = text.index("\\keepsect{Nuestras credenciales}{\\credentials}")
+    assert credentials < text.index("\\signature{Equipo de ventas}")
 
 
 # --- escaping -------------------------------------------------------------
@@ -576,6 +584,7 @@ Referencia en dólares, por adulto & US\$ 71.43 \\
 \end{tabularx}
 \sect{Opcionales}
 \par\medskip\noindent\textbf{Globo aerostático}\par
+\par\nopagebreak
 \noindent
 \begin{tabularx}{\linewidth}{@{}Xl@{}}
 \toprule
@@ -584,6 +593,7 @@ Referencia en dólares, por adulto & US\$ 71.43 \\
 {}Servicio balloon & por persona \\
 \bottomrule
 \end{tabularx}
+\par\nopagebreak
 \noindent
 \begin{tabularx}{\linewidth}{@{}Xr@{}}
 Precio total & \textbf{S/ 1,248.75} \\
@@ -602,8 +612,7 @@ Adulto extranjero & S/ 71.00 \\
 Niño de 6 a 15 años & S/ 11.00 \\
 \end{tabularx}
 \notebox{Estos importes se pagan directamente en destino y no forman parte del total.}
-\sect{Nuestras credenciales}
-\credentials
+\keepsect{Nuestras credenciales}{\credentials}
 \signature{Equipo de ventas}
 \end{document}"""
 
@@ -715,7 +724,7 @@ def test_english_fixed_texts_appear():
         "\\sect{Included services}",
         "\\sect{Optional extras}",
         "\\sect{Paid on site}",
-        "\\sect{Our credentials}",
+        "\\keepsect{Our credentials}{\\credentials}",
         "\\textbf{Service} & \\textbf{Basis}",
         "Total price & ",
         "Price per adult & ",

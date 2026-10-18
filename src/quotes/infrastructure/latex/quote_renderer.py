@@ -180,6 +180,7 @@ _TEXTS = {Language.SPANISH: _SPANISH, Language.ENGLISH: _ENGLISH}
 _TABLE_OPEN = "\\noindent\n\\begin{tabularx}{\\linewidth}{@{}Xl@{}}"
 _PRICE_TABLE_OPEN = "\\noindent\n\\begin{tabularx}{\\linewidth}{@{}Xr@{}}"
 _TABLE_CLOSE = "\\end{tabularx}"
+_KEEP_WITH_NEXT = "\\par\\nopagebreak"
 
 
 def _checked_path(role: str, path: Path) -> str:
@@ -278,8 +279,11 @@ def _price_table(breakdown: PriceBreakdown, texts: _Texts) -> str:
 def _extras_section(document: QuoteDocument, texts: _Texts) -> list[str]:
     parts = [f"\\sect{{{texts.optional}}}"]
     for extra in document.quote.extras:
+        # Each extra reads as one unit, so its label, services and prices share a page.
         parts.append(f"\\par\\medskip\\noindent\\textbf{{{escape_latex(extra.label)}}}\\par")
+        parts.append(_KEEP_WITH_NEXT)
         parts.append(_flat_services_table(extra.lines, texts))
+        parts.append(_KEEP_WITH_NEXT)
         parts.append(_price_table(extra.breakdown, texts))
     parts.append(f"\\notebox{{{texts.optional_note}}}")
     return parts
@@ -367,8 +371,7 @@ class LatexQuoteRenderer:
         if quote.paid_locally:
             parts += _local_payments_section(document, texts)
         parts += [
-            f"\\sect{{{texts.credentials}}}",
-            "\\credentials",
+            f"\\keepsect{{{texts.credentials}}}{{\\credentials}}",
             f"\\signature{{{escape_latex(document.signed_by)}}}",
         ]
         return parts

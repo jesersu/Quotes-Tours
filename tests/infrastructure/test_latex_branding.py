@@ -72,8 +72,7 @@ Señor viajero: ¿listo para el cañón? ¡Sí! Niño, pingüino, 3.800~m. \TODO
 \notebox{Nota de prueba.}
 \sect{Vehículo}
 \vehicletable{Siete viajeros.}{Guía bilingüe.}
-\sect{Credenciales}
-\credentials
+\keepsect{Credenciales}{\credentials}
 \sect{Confirmar}
 \confirmblock{Por favor confirme.}
 \signature{Equipo de ventas}
@@ -248,3 +247,21 @@ def test_found_images_leave_no_missing_line(tmp_path):
 
     assert_compiled(tmp_path, result)
     assert MISSING_LINE not in log
+
+
+def test_credentials_keep_the_company_table_with_the_certificate():
+    style = STYLE_PATH.read_text(encoding="utf-8")
+    body = style[style.index("\\newcommand{\\credentials}") :]
+    body = body[: body.index("\\end{tabularx}")]
+    gap = body[body.rindex("\\end{minipage}") : body.index("\\begin{tabularx}")]
+
+    assert "\\nopagebreak" in gap
+
+
+def test_a_kept_section_reserves_room_for_its_whole_body_before_its_heading():
+    style = STYLE_PATH.read_text(encoding="utf-8")
+    body = style[style.index("\\newcommand{\\keepsect}") :]
+    body = body[: body.index("\\section*")]
+
+    assert "\\sbox" in body
+    assert "\\Needspace*{\\dimexpr\\ht" in body
