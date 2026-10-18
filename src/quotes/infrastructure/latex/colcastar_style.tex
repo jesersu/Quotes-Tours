@@ -196,6 +196,14 @@
 % the bottom of the page before starting, so the title is not orphaned.
 % Raise it when what follows is a block that cannot be split.
 \newcommand{\sect}[2][6]{\Needspace*{#1\baselineskip}\section*{#2}}
+% A section whose body must not split, such as the credentials: the body is
+% measured first, and the heading and body move to the next page together
+% when they do not fit.
+\newsavebox{\cokeepbox}
+\newcommand{\keepsect}[2]{%
+  \par\sbox{\cokeepbox}{\begin{minipage}{\linewidth}#2\end{minipage}}%
+  \Needspace*{\dimexpr\ht\cokeepbox+\dp\cokeepbox+4\baselineskip\relax}%
+  \section*{#1}\noindent\usebox{\cokeepbox}\par}
 
 % Day header inside an itinerary.
 \newcommand{\dayhead}[2]{%
@@ -302,7 +310,8 @@
       {\footnotesize\color{brandslate}\CoConstancia, \CoConstanciaFecha.}
     \fi
   \end{minipage}
-  \par\vspace{0.8em}\noindent
+  % The company table belongs to the certificate: never leave it alone on the next page.
+  \par\nopagebreak\vspace{0.8em}\nopagebreak\noindent
   \begin{tabularx}{\linewidth}{@{}>{\leavevmode\bfseries\color{brandnavy}}l@{\hspace{1.4em}}>{\raggedright\arraybackslash}X@{}}
     \ifcoEnglish Registered name\else Razón social\fi & \CoLegalName \\
     \ifcoEnglish Trading name\else Nombre comercial\fi & \CoTradeName \\
