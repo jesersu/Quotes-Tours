@@ -13,7 +13,7 @@ import psycopg
 
 from quotes.application.catalog import CatalogLoad, CatalogRepository
 from quotes.application.catalog_proposal import propose_catalog
-from quotes.application.quote import build_quote
+from quotes.application.quote import build_quote_options
 from quotes.application.quote_rendering import QuoteDocument
 from quotes.domain.errors import DomainError
 from quotes.infrastructure.catalog_draft import dump_draft, load_draft, validate_draft
@@ -199,9 +199,9 @@ def _quote_build(
     if loaded is None:
         return EXIT_UNAVAILABLE
     try:
-        quote = build_quote(wanted.request, loaded.catalog, wanted.policy)
+        quoted = build_quote_options(wanted.options, loaded.catalog, wanted.policy)
         document = QuoteDocument(
-            quote,
+            quoted,
             wanted.client_name,
             wanted.title,
             wanted.issued_on or today(),
@@ -245,9 +245,10 @@ def _quote_build(
         print("warning: the PDF shows placeholder boxes instead of those images.", file=err)
     print("Quote built", file=out)
     print(f"  written to: {result.path}", file=out)
-    print(f"  services: {len(quote.lines)}", file=out)
-    print(f"  optional extras: {len(quote.extras)}", file=out)
-    print(f"  paid locally: {len(quote.paid_locally)}", file=out)
+    print(f"  options: {len(quoted)}", file=out)
+    print(f"  services: {sum(len(option.quote.lines) for option in quoted)}", file=out)
+    print(f"  optional extras: {sum(len(option.quote.extras) for option in quoted)}", file=out)
+    print(f"  paid locally: {len(quoted[0].quote.paid_locally)}", file=out)
     print(f"  language: {document.language.value}", file=out)
     return EXIT_OK
 

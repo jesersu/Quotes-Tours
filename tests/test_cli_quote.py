@@ -386,3 +386,85 @@ def test_end_to_end_with_the_real_compiler(files):
     assert output.read_bytes().startswith(b"%PDF")
     assert "warning: missing image" in err
     assert PRICE not in out + err
+
+
+# --- several options ---
+
+OPTIONS_REQUEST = f"""\
+client: Smith family
+title: Colca Canyon
+language: en
+date: 2026-10-14
+signed_by: Sales team
+days: 2
+travelers:
+  adults: 2
+pricing:
+  margin_rate: {MARGIN}
+  fx_rate: "{FX}"
+paid_locally: [colca-ticket]
+options:
+  - label: Option 1
+    subtitle: Ends in Puno
+    items:
+      - id: van
+    extras:
+      - label: Horseback ride
+        items:
+          - id: horse
+  - label: Option 2
+    days: 3
+    items:
+      - id: van
+      - id: guide
+"""
+
+
+def test_options_request_builds_one_document_with_counts_only(files):
+    request, _, output = files
+    request.write_text(OPTIONS_REQUEST, encoding="utf-8")
+    fake = FakeCompile()
+
+    code, out, err = build(files, compile=fake)
+
+    assert code == 0
+    assert output.read_bytes() == b"%PDF-fake"
+    assert "options: 2" in out
+    assert "services: 3" in out
+    assert "optional extras: 1" in out
+    assert "paid locally: 1" in out
+    assert fake.tex.count("\\opthead{") == 2
+    assert err == ""
+    for secret in (PRICE, MARGIN, FX, TICKET, "margin", "total"):
+        assert secret not in (out + err).lower()
+
+
+def test_a_single_option_request_reports_one_option(files):
+    code, out, _ = build(files, compile=FakeCompile())
+
+    assert code == 0
+    assert "options: 1" in out
+
+
+def test_options_request_problems_exit_2_with_paths_and_no_money(files):
+    request, _, _ = files
+    request.write_text(
+        OPTIONS_REQUEST.replace("label: Option 2", "label: Option 1"), encoding="utf-8"
+    )
+
+    code, out, err = build(files, compile=FakeCompile())
+
+    assert code == 2
+    assert out == ""
+    assert "options[1].label" in err
+    assert MARGIN not in err
+
+
+def test_an_unknown_id_in_an_option_exits_2(files):
+    request, _, _ = files
+    request.write_text(OPTIONS_REQUEST.replace("id: guide", "id: ghost"), encoding="utf-8")
+
+    code, _, err = build(files, compile=FakeCompile())
+
+    assert code == 2
+    assert "ghost" in err

@@ -265,3 +265,19 @@ def test_a_kept_section_reserves_room_for_its_whole_body_before_its_heading():
 
     assert "\\sbox" in body
     assert "\\Needspace*{\\dimexpr\\ht" in body
+
+
+def test_an_option_heading_reserves_room_so_it_never_ends_a_page():
+    style = STYLE_PATH.read_text(encoding="utf-8")
+    body = style[style.index("\\newcommand{\\opthead}") :]
+    body = body[: body.index("\\begin{tabularx}")]
+
+    assert "\\Needspace*" in body
+
+
+def test_a_section_heading_reserves_room_for_a_labeled_table_after_it():
+    style = STYLE_PATH.read_text(encoding="utf-8")
+    default = re.search(r"\\newcommand\{\\sect\}\[2\]\[(\d+)\]", style)
+
+    assert default is not None
+    assert int(default.group(1)) >= 10

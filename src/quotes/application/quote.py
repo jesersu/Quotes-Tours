@@ -5,6 +5,7 @@ All money arithmetic stays in the domain; this module only looks items up and wi
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from quotes.application.catalog import Catalog, CatalogEntry, LocalPaymentEntry
@@ -125,6 +126,36 @@ class Quote:
     paid_locally: tuple[LocalPaymentEntry, ...]
 
 
+@dataclass(frozen=True)
+class QuoteOption:
+    """One priced alternative of a quote: a request with an optional label and subtitle.
+
+    A label of ``None`` is only for the single unlabeled option of a plain quote.
+    """
+
+    label: str | None
+    subtitle: str | None
+    request: QuoteRequest
+
+    def __post_init__(self) -> None:
+        if self.label is not None:
+            _require_text("Option label", self.label)
+            object.__setattr__(self, "label", self.label.strip())
+        if self.subtitle is not None:
+            if not isinstance(self.subtitle, str):
+                raise InvalidPricingInput("Option subtitle must be text")
+            object.__setattr__(self, "subtitle", self.subtitle.strip() or None)
+        if not isinstance(self.request, QuoteRequest):
+            raise InvalidPricingInput("Option request must be a QuoteRequest")
+
+
+@dataclass(frozen=True)
+class QuotedOption:
+    label: str | None
+    subtitle: str | None
+    quote: Quote
+
+
 def _quote_lines(
     requested: tuple[RequestedItem, ...], request: QuoteRequest, catalog: Catalog
 ) -> tuple[QuotedLine, ...]:
@@ -166,3 +197,32 @@ def build_quote(request: QuoteRequest, catalog: Catalog, policy: PricingPolicy) 
         for label, quoted_lines in extra_lines
     )
     return Quote(request, lines, breakdown, extras, paid_locally)
+
+
+def check_option_labels(labels: Iterable[str | None]) -> None:
+    """Several options must all be labeled, with unique labels. One option may be unlabeled."""
+    labels = list(labels)
+    if len(labels) > 1:
+        if None in labels:
+            raise InvalidPricingInput("Every option needs a label when there are several")
+        if len(set(labels)) != len(labels):
+            raise InvalidPricingInput("Option labels must be unique")
+
+
+def build_quote_options(
+    options: tuple[QuoteOption, ...], catalog: Catalog, policy: PricingPolicy
+) -> tuple[QuotedOption, ...]:
+    """Quote every option alone with the same policy; there is no arithmetic across options.
+
+    Several options must all be labeled, with unique labels. One option may be unlabeled.
+    """
+    options = _as_tuple("Options", options)
+    if not options:
+        raise InvalidPricingInput("Options need at least one option")
+    if not all(isinstance(option, QuoteOption) for option in options):
+        raise InvalidPricingInput("Options must contain only quote options")
+    check_option_labels(option.label for option in options)
+    return tuple(
+        QuotedOption(option.label, option.subtitle, build_quote(option.request, catalog, policy))
+        for option in options
+    )

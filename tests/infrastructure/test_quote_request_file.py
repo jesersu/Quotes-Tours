@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from quotes.application.quote import QuoteRequest, RequestedExtra, RequestedItem
+from quotes.application.quote import QuoteOption, QuoteRequest, RequestedExtra, RequestedItem
 from quotes.application.quote_rendering import Language
 from quotes.domain.travelers import Travelers
 from quotes.infrastructure.quote_request_file import InvalidRequestFile, read_quote_request
@@ -262,3 +262,166 @@ def test_message_lists_every_problem(tmp_path):
         read_quote_request(write(tmp_path, "{}"))
     message = str(caught.value)
     assert all(problem in message for problem in caught.value.problems)
+
+
+# --- several options ---
+
+OPTIONS = """\
+client: Ana
+title: Trip
+signed_by: Team
+days: 2
+travelers:
+  adults: 2
+pricing:
+  margin_rate: 0.25
+paid_locally: [ticket]
+options:
+  - label: Option 1
+    subtitle: Ends in Puno
+    items:
+      - id: van
+    extras:
+      - label: Horse
+        items:
+          - id: horse
+  - label: Option 2
+    days: 3
+    items:
+      - id: van
+      - id: hotel
+"""
+
+
+def test_options_are_read_with_shared_travelers_and_paid_locally(tmp_path):
+    loaded = read_quote_request(write(tmp_path, OPTIONS))
+
+    first, second = loaded.options
+    assert (first.label, first.subtitle) == ("Option 1", "Ends in Puno")
+    assert (second.label, second.subtitle) == ("Option 2", None)
+    assert first.request == QuoteRequest(
+        2,
+        Travelers(2),
+        (RequestedItem("van"),),
+        (RequestedExtra("Horse", (RequestedItem("horse"),)),),
+        ("ticket",),
+    )
+    assert second.request.days == 3
+    assert second.request.travelers == first.request.travelers
+    assert second.request.paid_locally == ("ticket",)
+    assert second.request.extras == ()
+
+
+def test_the_top_level_format_is_one_unlabeled_option(tmp_path):
+    loaded = read_quote_request(write(tmp_path, MINIMAL))
+
+    (only,) = loaded.options
+    assert (only.label, only.subtitle) == (None, None)
+    assert only.request == loaded.request
+
+
+def test_request_is_only_available_for_a_single_option(tmp_path):
+    loaded = read_quote_request(write(tmp_path, OPTIONS))
+
+    with pytest.raises(ValueError, match="options"):
+        loaded.request  # noqa: B018
+
+
+def test_every_option_may_carry_its_own_days_without_a_default(tmp_path):
+    text = OPTIONS.replace("days: 2\n", "").replace("    subtitle", "    days: 1\n    subtitle")
+
+    loaded = read_quote_request(write(tmp_path, text))
+
+    assert [o.request.days for o in loaded.options] == [1, 3]
+
+
+def test_days_are_required_when_an_option_has_none(tmp_path):
+    text = OPTIONS.replace("days: 2\n", "", 1)
+
+    assert "days is required" in problems_of(tmp_path, text)
+
+
+def test_options_and_top_level_items_are_mutually_exclusive(tmp_path):
+    problems = problems_of(tmp_path, OPTIONS + "items:\n  - id: van\n")
+
+    assert any("options" in p and "items" in p for p in problems)
+
+
+def test_options_and_top_level_extras_are_mutually_exclusive(tmp_path):
+    problems = problems_of(
+        tmp_path, OPTIONS + "extras:\n  - label: X\n    items:\n      - id: horse\n"
+    )
+
+    assert any("options" in p and "extras" in p for p in problems)
+
+
+def test_neither_items_nor_options_is_a_problem(tmp_path):
+    text = MINIMAL.replace("items:\n  - id: van\n", "")
+
+    problems = problems_of(tmp_path, text)
+
+    assert "items is required" in problems
+    assert any("options" in p and "items" in p for p in problems)
+
+
+def test_options_must_be_a_non_empty_list(tmp_path):
+    base = MINIMAL.replace("items:\n  - id: van\n", "")
+
+    assert "options must be a list" in problems_of(tmp_path, base + "options: nope\n")
+    assert "options needs at least one option" in problems_of(tmp_path, base + "options: []\n")
+
+
+def test_option_labels_must_be_present_non_empty_and_unique(tmp_path):
+    text = OPTIONS.replace("label: Option 2", "label: ' Option 1 '")
+    assert any("options[1].label" in p and "unique" in p for p in problems_of(tmp_path, text))
+
+    text = OPTIONS.replace("label: Option 2", "label: '  '")
+    assert "options[1].label must be non-empty text" in problems_of(tmp_path, text)
+
+    text = OPTIONS.replace("  - label: Option 2\n", "  - days: 3\n")
+    assert "options[1].label is required" in problems_of(tmp_path, text)
+
+
+def test_option_problems_are_reported_together_with_their_paths(tmp_path):
+    text = (
+        OPTIONS.replace("days: 3", "days: many")
+        .replace("subtitle: Ends in Puno", "subtitle: 5\n    colour: red")
+        .replace("      - id: hotel\n", "      - quantity: 2\n")
+    )
+
+    problems = problems_of(tmp_path, text)
+
+    assert "options[1].days must be a whole number" in problems
+    assert "options[0].subtitle must be non-empty text" in problems
+    assert any("options[0]: unknown key 'colour'" in p for p in problems)
+    assert "options[1].items[1].id is required" in problems
+
+
+def test_option_extras_use_their_own_path(tmp_path):
+    text = OPTIONS.replace("- label: Horse", "- name: Horse")
+
+    problems = problems_of(tmp_path, text)
+
+    assert any(p.startswith("options[0].extras[0]") for p in problems)
+
+
+def test_an_unknown_option_key_gets_a_hint(tmp_path):
+    problems = problems_of(tmp_path, OPTIONS.replace("subtitle:", "subtile:"))
+
+    assert any("unknown key 'subtile'" in p and "did you mean 'subtitle'" in p for p in problems)
+
+
+def test_option_values_are_never_echoed(tmp_path):
+    text = OPTIONS.replace("margin_rate: 0.25", "margin_rate: 7.31x")
+
+    problems = problems_of(tmp_path, text)
+
+    assert problems
+    assert all("7.31" not in p for p in problems)
+
+
+def test_the_example_file_documents_options_as_a_comment():
+    text = EXAMPLE.read_text(encoding="utf-8")
+
+    assert "options:" in text
+    assert isinstance(read_quote_request(EXAMPLE).options[0], QuoteOption)

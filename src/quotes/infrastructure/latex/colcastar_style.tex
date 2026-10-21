@@ -195,7 +195,8 @@
 % Section title. The optional argument is how many lines must be free at
 % the bottom of the page before starting, so the title is not orphaned.
 % Raise it when what follows is a block that cannot be split.
-\newcommand{\sect}[2][6]{\Needspace*{#1\baselineskip}\section*{#2}}
+% The default room fits a labeled table after the heading, such as a paid-locally item.
+\newcommand{\sect}[2][10]{\Needspace*{#1\baselineskip}\section*{#2}}
 % A section whose body must not split, such as the credentials: the body is
 % measured first, and the heading and body move to the next page together
 % when they do not fit.
@@ -213,8 +214,9 @@
   \end{tabularx}\par\vspace{0.45em}}
 
 % Option header, when a proposal offers more than one programme.
+% The heading needs room for the start of its option, or it would end a page alone.
 \newcommand{\opthead}[2]{%
-  \par\vspace{1.1em}\noindent
+  \par\Needspace*{12\baselineskip}\vspace{1.1em}\noindent
   \begin{tabularx}{\linewidth}{@{}>{\columncolor{brandgold}}p{3.3cm}>{\columncolor{brandnavy}}X@{}}
     \leavevmode\color{brandnavy}\bfseries #1 & \leavevmode\color{white}\bfseries #2 \\
   \end{tabularx}\par\vspace{0.5em}}

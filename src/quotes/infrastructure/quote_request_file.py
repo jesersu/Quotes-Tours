@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from quotes.application.quote import QuoteRequest, RequestedExtra, RequestedItem
+from quotes.application.quote import QuoteOption, QuoteRequest, RequestedExtra, RequestedItem
 from quotes.application.quote_rendering import Language
 from quotes.domain.errors import InvalidPricingInput
 from quotes.domain.money import to_decimal
@@ -36,12 +36,14 @@ _TOP_KEYS = (
     "pricing",
     "items",
     "extras",
+    "options",
     "paid_locally",
 )
 _TRAVELER_KEYS = ("adults", "child_ages")
 _PRICING_KEYS = ("margin_rate", "fx_rate", "usd_rounding_step")
 _ITEM_KEYS = ("id", "days", "quantity")
 _EXTRA_KEYS = ("label", "items")
+_OPTION_KEYS = ("label", "subtitle", "days", "items", "extras")
 
 
 class InvalidRequestFile(Exception):
@@ -54,13 +56,20 @@ class InvalidRequestFile(Exception):
 
 @dataclass(frozen=True)
 class QuoteRequestFile:
-    request: QuoteRequest
+    options: tuple[QuoteOption, ...]  # one unlabeled option for a plain request
     policy: PricingPolicy
     client_name: str
     title: str
     signed_by: str
     language: Language
     issued_on: datetime.date | None  # None: the caller uses today's date
+
+    @property
+    def request(self) -> QuoteRequest:
+        """The request of a plain, single-option file; several options have no one request."""
+        if len(self.options) != 1:
+            raise ValueError("This file has several options; read them from `options`")
+        return self.options[0].request
 
 
 class _NoFloatLoader(yaml.SafeLoader):
@@ -218,11 +227,11 @@ def _items(data: Any, path: str, problems: list[str]) -> tuple[RequestedItem, ..
     return tuple(items) if len(problems) == start else None
 
 
-def _extras(data: Any, problems: list[str]) -> tuple[RequestedExtra, ...]:
-    listed = _list(data, "extras", problems)
+def _extras(data: Any, problems: list[str], path: str = "extras") -> tuple[RequestedExtra, ...]:
+    listed = _list(data, path, problems)
     extras: list[RequestedExtra] = []
     for index, entry in enumerate(listed or []):
-        label = f"extras[{index}]"
+        label = f"{path}[{index}]"
         mapping = _mapping(entry, label, _EXTRA_KEYS, problems)
         if mapping is None:
             continue
@@ -236,6 +245,67 @@ def _extras(data: Any, problems: list[str]) -> tuple[RequestedExtra, ...]:
         except InvalidPricingInput as exc:
             problems.append(f"{label}: {exc}")
     return tuple(extras)
+
+
+def _option(
+    entry: Any,
+    index: int,
+    default_days: Any,
+    travelers: Travelers | None,
+    paid: tuple[str, ...],
+    problems: list[str],
+) -> QuoteOption | None:
+    path = f"options[{index}]"
+    mapping = _mapping(entry, path, _OPTION_KEYS, problems)
+    if mapping is None:
+        return None
+    start = len(problems)
+    label = _text(_required(mapping, "label", f"{path}.", problems), f"{path}.label", problems)
+    subtitle = mapping.get("subtitle")
+    if subtitle is not None:
+        subtitle = _text(subtitle, f"{path}.subtitle", problems)
+    days = default_days
+    if mapping.get("days") is not None:
+        days = _int(mapping["days"], f"{path}.days", problems)
+    raw_items = _required(mapping, "items", f"{path}.", problems)
+    items = _items(raw_items, f"{path}.items", problems) if raw_items is not None else None
+    extras = ()
+    if mapping.get("extras") is not None:
+        extras = _extras(mapping["extras"], problems, f"{path}.extras")
+    if len(problems) > start or travelers is None or days is None:
+        return None
+    try:
+        return QuoteOption(label, subtitle, QuoteRequest(days, travelers, items, extras, paid))
+    except InvalidPricingInput as exc:
+        problems.append(f"{path}: {exc}")
+        return None
+
+
+def _options(
+    data: Any,
+    default_days: Any,
+    travelers: Travelers | None,
+    paid: tuple[str, ...],
+    problems: list[str],
+) -> tuple[QuoteOption, ...]:
+    listed = _list(data, "options", problems)
+    if listed is not None and not listed:
+        problems.append("options needs at least one option")
+    options = [
+        _option(entry, index, default_days, travelers, paid, problems)
+        for index, entry in enumerate(listed or [])
+    ]
+    seen: dict[str, int] = {}
+    for index, option in enumerate(options):
+        if option is None:
+            continue
+        if option.label in seen:
+            problems.append(
+                f"options[{index}].label must be unique; "
+                f"it repeats options[{seen[option.label]}].label"
+            )
+        seen.setdefault(option.label, index)
+    return tuple(option for option in options if option is not None)
 
 
 def _paid_locally(data: Any, problems: list[str]) -> tuple[str, ...]:
@@ -276,28 +346,56 @@ def read_quote_request(path: Path) -> QuoteRequestFile:
     client = _text(_required(top, "client", "", problems), "client", problems)
     title = _text(_required(top, "title", "", problems), "title", problems)
     signed_by = _text(_required(top, "signed_by", "", problems), "signed_by", problems)
-    days = _required(top, "days", "", problems)
-    days = _int(days, "days", problems) if days is not None else None
+    has_options = top.get("options") is not None
+    flat_keys = [key for key in ("items", "extras") if top.get(key) is not None]
+    if has_options and flat_keys:
+        problems.append(
+            f"options cannot be combined with top-level {' or '.join(flat_keys)}; "
+            "put them inside each option"
+        )
+    elif not has_options and top.get("items") is None:
+        problems.append("items is required")
+        problems.append("request: give either top-level items or options")
     language = _language(top.get("language"), problems)
     issued_on = _issue_date(top.get("date"), problems)
+
+    days = top.get("days")
+    days = _int(days, "days", problems) if days is not None else None
+    option_entries = top["options"] if isinstance(top.get("options"), list) else []
+    # Top-level days is optional only when every option names its own.
+    if (
+        days is None
+        and top.get("days") is None
+        and (
+            not has_options
+            or not option_entries
+            or not all(isinstance(e, Mapping) and e.get("days") is not None for e in option_entries)
+        )
+    ):
+        problems.append("days is required")
 
     travelers_data = _required(top, "travelers", "", problems)
     travelers = _travelers(travelers_data, problems) if travelers_data is not None else None
     pricing_data = _required(top, "pricing", "", problems)
     policy = _policy(pricing_data, problems) if pricing_data is not None else None
-    items_data = _required(top, "items", "", problems)
-    items = _items(items_data, "items", problems) if items_data is not None else None
-    extras = _extras(top["extras"], problems) if top.get("extras") is not None else ()
     paid = (
         _paid_locally(top["paid_locally"], problems) if top.get("paid_locally") is not None else ()
     )
 
-    request = None
-    if not problems:
-        try:
-            request = QuoteRequest(days, travelers, items, extras, paid)
-        except InvalidPricingInput as exc:
-            problems.append(f"request: {exc}")
-    if problems or request is None or policy is None:
+    options: tuple[QuoteOption, ...] = ()
+    if has_options:
+        options = _options(top["options"], days, travelers, paid, problems)
+    elif top.get("items") is not None:
+        items = _items(top["items"], "items", problems)
+        extras = _extras(top["extras"], problems) if top.get("extras") is not None else ()
+        if not problems:
+            try:
+                options = (
+                    QuoteOption(None, None, QuoteRequest(days, travelers, items, extras, paid)),
+                )
+            except InvalidPricingInput as exc:
+                problems.append(f"request: {exc}")
+
+    if problems or not options or policy is None:
         raise InvalidRequestFile(tuple(problems))
-    return QuoteRequestFile(request, policy, client, title, signed_by, language, issued_on)
+    return QuoteRequestFile(options, policy, client, title, signed_by, language, issued_on)
