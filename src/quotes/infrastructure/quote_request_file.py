@@ -16,7 +16,13 @@ from typing import Any
 
 import yaml
 
-from quotes.application.quote import QuoteOption, QuoteRequest, RequestedExtra, RequestedItem
+from quotes.application.quote import (
+    ItineraryDay,
+    QuoteOption,
+    QuoteRequest,
+    RequestedExtra,
+    RequestedItem,
+)
 from quotes.application.quote_rendering import Language
 from quotes.domain.errors import InvalidPricingInput
 from quotes.domain.money import to_decimal
@@ -37,13 +43,15 @@ _TOP_KEYS = (
     "items",
     "extras",
     "options",
+    "itinerary",
     "paid_locally",
 )
 _TRAVELER_KEYS = ("adults", "child_ages")
 _PRICING_KEYS = ("margin_rate", "fx_rate", "usd_rounding_step")
-_ITEM_KEYS = ("id", "days", "quantity")
+_ITEM_KEYS = ("id", "days", "quantity", "on_days")
+_ITINERARY_KEYS = ("day", "title")
 _EXTRA_KEYS = ("label", "items")
-_OPTION_KEYS = ("label", "subtitle", "days", "items", "extras")
+_OPTION_KEYS = ("label", "subtitle", "days", "items", "extras", "itinerary")
 
 
 class InvalidRequestFile(Exception):
@@ -201,7 +209,65 @@ def _policy(data: Any, problems: list[str]) -> PricingPolicy | None:
         return None
 
 
-def _items(data: Any, path: str, problems: list[str]) -> tuple[RequestedItem, ...] | None:
+def _day_number(value: Any, path: str, days: int | None, problems: list[str]) -> int | None:
+    """A day of the trip: a whole number from 1 to the days of the quote, when those are known."""
+    if (day := _int(value, path, problems)) is None:
+        return None
+    if day < 1:
+        problems.append(f"{path} must be at least 1")
+        return None
+    if days is not None and day > days:
+        problems.append(f"{path} must not exceed the {days} days of the quote")
+        return None
+    return day
+
+
+def _on_days(value: Any, path: str, days: int | None, problems: list[str]) -> tuple[int, ...]:
+    listed = _list(value, path, problems)
+    found: list[int] = []
+    for index, raw in enumerate(listed or []):
+        day = _day_number(raw, f"{path}[{index}]", days, problems)
+        if day is None:
+            continue
+        if day in found:
+            problems.append(f"{path} must not repeat day {day}")
+        found.append(day)
+    return tuple(found)
+
+
+def _itinerary(
+    data: Any, path: str, days: int | None, problems: list[str]
+) -> tuple[ItineraryDay, ...]:
+    listed = _list(data, path, problems)
+    entries: list[ItineraryDay] = []
+    seen: dict[int, int] = {}
+    for index, entry in enumerate(listed or []):
+        label = f"{path}[{index}]"
+        mapping = _mapping(entry, label, _ITINERARY_KEYS, problems)
+        if mapping is None:
+            continue
+        raw_day = _required(mapping, "day", f"{label}.", problems)
+        day = _day_number(raw_day, f"{label}.day", days, problems) if raw_day is not None else None
+        raw_title = _required(mapping, "title", f"{label}.", problems)
+        title = _text(raw_title, f"{label}.title", problems) if raw_title is not None else None
+        if day is not None and day in seen:
+            problems.append(f"{label}.day repeats {path}[{seen[day]}].day")
+            continue
+        if day is not None:
+            seen[day] = index
+        if day is not None and title is not None:
+            entries.append(ItineraryDay(day, title))
+    return tuple(entries)
+
+
+def _items(
+    data: Any,
+    path: str,
+    problems: list[str],
+    days: int | None = None,
+    placeable: bool = True,
+) -> tuple[RequestedItem, ...] | None:
+    """Requested items. ``days`` bounds ``on_days``; extras are not placed in the itinerary."""
     listed = _list(data, path, problems)
     if listed is None:
         return None
@@ -214,10 +280,17 @@ def _items(data: Any, path: str, problems: list[str]) -> tuple[RequestedItem, ..
             continue
         before = len(problems)
         item_id = _text(_required(mapping, "id", f"{label}.", problems), f"{label}.id", problems)
-        options: dict[str, int | None] = {}
+        options: dict[str, Any] = {}
         for key in ("days", "quantity"):
             if mapping.get(key) is not None:
                 options[key] = _int(mapping[key], f"{label}.{key}", problems)
+        if mapping.get("on_days") is not None:
+            if placeable:
+                options["on_days"] = _on_days(
+                    mapping["on_days"], f"{label}.on_days", days, problems
+                )
+            else:
+                problems.append(f"{label}.on_days is not allowed on optional extras")
         if len(problems) > before:
             continue
         try:
@@ -237,7 +310,11 @@ def _extras(data: Any, problems: list[str], path: str = "extras") -> tuple[Reque
             continue
         name = _text(_required(mapping, "label", f"{label}.", problems), f"{label}.label", problems)
         raw_items = _required(mapping, "items", f"{label}.", problems)
-        items = _items(raw_items, f"{label}.items", problems) if raw_items is not None else None
+        items = (
+            _items(raw_items, f"{label}.items", problems, placeable=False)
+            if raw_items is not None
+            else None
+        )
         if name is None or items is None:
             continue
         try:
@@ -245,6 +322,11 @@ def _extras(data: Any, problems: list[str], path: str = "extras") -> tuple[Reque
         except InvalidPricingInput as exc:
             problems.append(f"{label}: {exc}")
     return tuple(extras)
+
+
+def _known(days: Any) -> int | None:
+    """The days of a quote when they are a usable number, else None (already reported)."""
+    return days if _is_int(days) and days >= 1 else None
 
 
 def _option(
@@ -268,14 +350,22 @@ def _option(
     if mapping.get("days") is not None:
         days = _int(mapping["days"], f"{path}.days", problems)
     raw_items = _required(mapping, "items", f"{path}.", problems)
-    items = _items(raw_items, f"{path}.items", problems) if raw_items is not None else None
+    items = (
+        _items(raw_items, f"{path}.items", problems, _known(days))
+        if raw_items is not None
+        else None
+    )
+    itinerary: tuple[ItineraryDay, ...] = ()
+    if mapping.get("itinerary") is not None:
+        itinerary = _itinerary(mapping["itinerary"], f"{path}.itinerary", _known(days), problems)
     extras = ()
     if mapping.get("extras") is not None:
         extras = _extras(mapping["extras"], problems, f"{path}.extras")
     if len(problems) > start or travelers is None or days is None:
         return None
     try:
-        return QuoteOption(label, subtitle, QuoteRequest(days, travelers, items, extras, paid))
+        request = QuoteRequest(days, travelers, items, extras, paid)
+        return QuoteOption(label, subtitle, request, itinerary)
     except InvalidPricingInput as exc:
         problems.append(f"{path}: {exc}")
         return None
@@ -347,7 +437,7 @@ def read_quote_request(path: Path) -> QuoteRequestFile:
     title = _text(_required(top, "title", "", problems), "title", problems)
     signed_by = _text(_required(top, "signed_by", "", problems), "signed_by", problems)
     has_options = top.get("options") is not None
-    flat_keys = [key for key in ("items", "extras") if top.get(key) is not None]
+    flat_keys = [key for key in ("items", "extras", "itinerary") if top.get(key) is not None]
     if has_options and flat_keys:
         problems.append(
             f"options cannot be combined with top-level {' or '.join(flat_keys)}; "
@@ -386,13 +476,15 @@ def read_quote_request(path: Path) -> QuoteRequestFile:
     if has_options:
         options = _options(top["options"], days, travelers, paid, problems)
     elif top.get("items") is not None:
-        items = _items(top["items"], "items", problems)
+        items = _items(top["items"], "items", problems, _known(days))
         extras = _extras(top["extras"], problems) if top.get("extras") is not None else ()
+        itinerary: tuple[ItineraryDay, ...] = ()
+        if top.get("itinerary") is not None:
+            itinerary = _itinerary(top["itinerary"], "itinerary", _known(days), problems)
         if not problems:
             try:
-                options = (
-                    QuoteOption(None, None, QuoteRequest(days, travelers, items, extras, paid)),
-                )
+                request = QuoteRequest(days, travelers, items, extras, paid)
+                options = (QuoteOption(None, None, request, itinerary),)
             except InvalidPricingInput as exc:
                 problems.append(f"request: {exc}")
 

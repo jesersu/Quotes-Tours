@@ -468,3 +468,44 @@ def test_an_unknown_id_in_an_option_exits_2(files):
 
     assert code == 2
     assert "ghost" in err
+
+
+def test_an_itinerary_request_reports_its_day_count_and_no_money(files):
+    request, _, _ = files
+    request.write_text(
+        REQUEST.replace(
+            "items:\n  - id: van\n",
+            "itinerary:\n  - day: 1\n    title: Arequipa - Chivay\n"
+            "  - day: 2\n    title: Back\nitems:\n  - id: van\n    on_days: [1, 2]\n",
+        ),
+        encoding="utf-8",
+    )
+    fake = FakeCompile()
+
+    code, out, err = build(files, compile=fake)
+
+    assert code == 0
+    assert "itinerary days: 2" in out
+    assert "\\dayhead{Day 1}{Arequipa - Chivay}" in fake.tex
+    assert err == ""
+    for secret in (PRICE, MARGIN, FX, TICKET, "margin", "total"):
+        assert secret not in (out + err).lower()
+
+
+def test_a_request_without_an_itinerary_reports_zero_days(files):
+    _, out, _ = build(files, compile=FakeCompile())
+
+    assert "itinerary days: 0" in out
+
+
+def test_on_days_outside_the_trip_exit_2_with_the_field_path(files):
+    request, _, _ = files
+    request.write_text(
+        REQUEST.replace("  - id: van\n", "  - id: van\n    on_days: [5]\n", 1), encoding="utf-8"
+    )
+
+    code, out, err = build(files, compile=FakeCompile())
+
+    assert code == 2
+    assert out == ""
+    assert "items[0].on_days[0]" in err

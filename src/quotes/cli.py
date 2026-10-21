@@ -248,6 +248,7 @@ def _quote_build(
     print(f"  options: {len(quoted)}", file=out)
     print(f"  services: {sum(len(option.quote.lines) for option in quoted)}", file=out)
     print(f"  optional extras: {sum(len(option.quote.extras) for option in quoted)}", file=out)
+    print(f"  itinerary days: {sum(len(option.itinerary) for option in quoted)}", file=out)
     print(f"  paid locally: {len(quoted[0].quote.paid_locally)}", file=out)
     print(f"  language: {document.language.value}", file=out)
     return EXIT_OK

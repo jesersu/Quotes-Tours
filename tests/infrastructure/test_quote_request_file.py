@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from quotes.application.quote import QuoteOption, QuoteRequest, RequestedExtra, RequestedItem
+from quotes.application.quote import (
+    ItineraryDay,
+    QuoteOption,
+    QuoteRequest,
+    RequestedExtra,
+    RequestedItem,
+)
 from quotes.application.quote_rendering import Language
 from quotes.domain.travelers import Travelers
 from quotes.infrastructure.quote_request_file import InvalidRequestFile, read_quote_request
@@ -49,7 +55,7 @@ def test_example_file_parses_into_the_expected_objects():
         travelers=Travelers(2, (8,)),
         items=(
             RequestedItem("van"),
-            RequestedItem("guide", days=1),
+            RequestedItem("guide", days=1, on_days=(1,)),
             RequestedItem("bus-seat", quantity=3),
         ),
         extras=(RequestedExtra("Horseback ride", (RequestedItem("horse"),)),),
@@ -425,3 +431,165 @@ def test_the_example_file_documents_options_as_a_comment():
 
     assert "options:" in text
     assert isinstance(read_quote_request(EXAMPLE).options[0], QuoteOption)
+
+
+# --- items assigned to days ---
+
+PLACED = """\
+client: Ana
+title: Trip
+signed_by: Team
+days: 3
+travelers:
+  adults: 2
+pricing:
+  margin_rate: 0.25
+itinerary:
+  - day: 1
+    title: Arequipa - Chivay
+  - day: 3
+    title: Back to Arequipa
+items:
+  - id: van
+    on_days: [2, 1]
+  - id: hotel
+extras:
+  - label: Horse
+    items:
+      - id: horse
+"""
+
+PLACED_OPTIONS = """\
+client: Ana
+title: Trip
+signed_by: Team
+days: 3
+travelers:
+  adults: 2
+pricing:
+  margin_rate: 0.25
+options:
+  - label: Option 1
+    itinerary:
+      - day: 2
+        title: Chivay
+    items:
+      - id: van
+      - id: hotel
+        on_days: [1, 3]
+  - label: Option 2
+    days: 2
+    items:
+      - id: van
+"""
+
+
+def test_a_plain_request_reads_on_days_and_the_itinerary(tmp_path):
+    (only,) = read_quote_request(write(tmp_path, PLACED)).options
+
+    assert only.request.items[0] == RequestedItem("van", on_days=(1, 2))
+    assert only.request.items[1].on_days == ()
+    assert only.itinerary == (
+        ItineraryDay(1, "Arequipa - Chivay"),
+        ItineraryDay(3, "Back to Arequipa"),
+    )
+
+
+def test_an_options_request_reads_on_days_and_the_itinerary_per_option(tmp_path):
+    first, second = read_quote_request(write(tmp_path, PLACED_OPTIONS)).options
+
+    assert first.request.items[1].on_days == (1, 3)
+    assert first.itinerary == (ItineraryDay(2, "Chivay"),)
+    assert second.itinerary == ()
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("[0]", "items[0].on_days[0] must be at least 1"),
+        ("[4]", "items[0].on_days[0] must not exceed the 3 days of the quote"),
+        ("[1, 1]", "items[0].on_days must not repeat day 1"),
+        ("[1.5]", "items[0].on_days[0] must be a whole number"),
+        ("[true]", "items[0].on_days[0] must be a whole number"),
+        ("2", "items[0].on_days must be a list"),
+    ],
+)
+def test_invalid_on_days_are_reported_with_their_path(tmp_path, value, message):
+    text = PLACED.replace("[2, 1]", value)
+
+    assert message in problems_of(tmp_path, text)
+
+
+def test_on_days_problems_in_an_option_use_the_option_path(tmp_path):
+    text = PLACED_OPTIONS.replace("[1, 3]", "[1, 3, 3]")
+
+    assert "options[0].items[1].on_days must not repeat day 3" in problems_of(tmp_path, text)
+
+
+def test_on_days_are_checked_against_the_days_of_their_own_option(tmp_path):
+    # The last item belongs to Option 2, which has 2 days while the request default is 3.
+    problems = problems_of(tmp_path, PLACED_OPTIONS + "        on_days: [3]\n")
+
+    assert "options[1].items[0].on_days[0] must not exceed the 2 days of the quote" in problems
+
+
+def test_on_days_are_not_allowed_on_extra_items(tmp_path):
+    text = PLACED.replace("      - id: horse\n", "      - id: horse\n        on_days: [1]\n")
+
+    assert "extras[0].items[0].on_days is not allowed on optional extras" in problems_of(
+        tmp_path, text
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("day: 1\n", "day: 0\n", "itinerary[0].day must be at least 1"),
+        ("day: 3\n", "day: 4\n", "itinerary[1].day must not exceed the 3 days of the quote"),
+        ("day: 3\n", "day: 1\n", "itinerary[1].day repeats itinerary[0].day"),
+        ("day: 1\n", "day: one\n", "itinerary[0].day must be a whole number"),
+        ("title: Back to Arequipa", "title: ''", "itinerary[1].title must be non-empty text"),
+    ],
+)
+def test_itinerary_problems_are_reported_with_their_path(tmp_path, old, new, message):
+    assert message in problems_of(tmp_path, PLACED.replace(old, new))
+
+
+def test_an_unknown_itinerary_key_gets_a_hint(tmp_path):
+    problems = problems_of(tmp_path, PLACED.replace("title: Arequipa", "titel: Arequipa"))
+
+    assert any(
+        "itinerary[0]: unknown key 'titel'" in p and "did you mean 'title'" in p for p in problems
+    )
+
+
+def test_the_itinerary_must_be_a_list(tmp_path):
+    head, _, tail = PLACED.partition("itinerary:\n")
+    text = head + "itinerary: soon\n" + tail[tail.index("items:") :]
+
+    assert "itinerary must be a list" in problems_of(tmp_path, text)
+
+
+def test_an_option_itinerary_uses_the_option_path(tmp_path):
+    text = PLACED_OPTIONS.replace("day: 2\n", "day: 5\n")
+
+    assert "options[0].itinerary[0].day must not exceed the 3 days of the quote" in problems_of(
+        tmp_path, text
+    )
+
+
+def test_options_cannot_be_combined_with_a_top_level_itinerary(tmp_path):
+    text = PLACED_OPTIONS.replace(
+        "options:\n", "itinerary:\n  - day: 1\n    title: X\noptions:\n", 1
+    )
+
+    problems = problems_of(tmp_path, text)
+
+    assert any("top-level" in p and "itinerary" in p for p in problems)
+
+
+def test_the_example_file_shows_on_days_and_an_itinerary():
+    (only,) = read_quote_request(EXAMPLE).options
+
+    assert any(item.on_days for item in only.request.items)
+    assert only.itinerary
