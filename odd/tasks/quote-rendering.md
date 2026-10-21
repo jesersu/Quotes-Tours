@@ -104,6 +104,6 @@ Turn a hand-written quote request into a branded PDF: look the items up in the c
 - T2 done on branch `feat/render-02-build-quote` (from main 248ee14).
 
 ## Next step
-Phase 3 is complete (T10 merged in PR #14, 6b023c3). Next: the owner applies the colcaStarTours migration in Supabase and runs its verify query; then push T7–T9 and the migration branch, and merge T9 only after the migration is live. Then Phase 4 (`odd/tasks/quote-planner.md`). Catalog names with lowercase proper nouns ("colca", "aqp") are catalog data, fixed through the draft YAML and SQL flow. T7 to T9 wait for the owner.
+Phase 3 is complete (T10 merged in PR #14, 6b023c3). Migration applied by the owner 2026-10-21 (verify query all true after a fix: its first version raised `42703` before the migration because `has_column_privilege` errors on a missing column; the privilege checks are now guarded by `CASE`). colcaStarTours PR #98 (`feat/quotes-catalog-descriptions` -> `develop`, commit d5b5cab, rebased onto `develop`). Real `catalog check` loads again with 30 `missing_description` warnings. Next: merge the T7–T9 PRs in order, write the descriptions in the draft, then Phase 4 (`odd/tasks/quote-planner.md`). Catalog names with lowercase proper nouns ("colca", "aqp") are catalog data, fixed through the draft YAML and SQL flow. T7 to T9 wait for the owner.
 
 After Phase 3: Phase 4 (LLM planner that turns free text into a `QuoteRequest` and writes the day text from catalog descriptions), RAG only if the planner shows a need, then the server.
