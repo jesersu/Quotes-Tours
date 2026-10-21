@@ -492,6 +492,25 @@ def test_an_itinerary_request_reports_its_day_count_and_no_money(files):
         assert secret not in (out + err).lower()
 
 
+def test_a_placement_alone_counts_every_day_the_pdf_shows(files):
+    request, _, _ = files
+    request.write_text(
+        REQUEST.replace(
+            "items:\n  - id: van\n",
+            "itinerary:\n  - day: 1\n    title: Arequipa - Chivay\n"
+            "items:\n  - id: van\n    on_days: [2]\n",
+        ),
+        encoding="utf-8",
+    )
+    fake = FakeCompile()
+
+    code, out, _ = build(files, compile=fake)
+
+    assert code == 0
+    assert "itinerary days: 2" in out
+    assert fake.tex.count("\\dayhead{") == 2
+
+
 def test_a_request_without_an_itinerary_reports_zero_days(files):
     _, out, _ = build(files, compile=FakeCompile())
 

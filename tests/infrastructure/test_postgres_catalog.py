@@ -25,6 +25,7 @@ pytestmark = [
 ]
 
 SQL_DIR = Path(__file__).resolve().parents[1] / "sql"
+VENDORED_SQL = ("quotes_schema.sql", "quotes_catalog_descriptions.sql")
 
 
 @pytest.fixture
@@ -34,7 +35,8 @@ def dsn():
     with psycopg.connect(url, autocommit=True) as conn:
         conn.execute("drop schema if exists quotes cascade")
         conn.execute((SQL_DIR / "supabase_prelude.sql").read_text())
-        conn.execute((SQL_DIR / "quotes_schema.sql").read_text())
+        for name in VENDORED_SQL:
+            conn.execute((SQL_DIR / name).read_text())
     return url
 
 
@@ -176,7 +178,11 @@ def test_partially_priced_local_item_is_kept_with_a_warning(run, dsn):
     loaded = PostgresCatalogRepository(dsn).load()
     assert [e.id for e in loaded.catalog.local_payments()] == ["partial-ticket"]
     assert loaded.errors == ()
-    assert [i.code for i in loaded.warnings] == ["missing_visitor_category"]
+    # good-item has no description, so it warns too.
+    assert [(i.code, i.subject_id) for i in loaded.warnings] == [
+        ("missing_description", "good-item"),
+        ("missing_visitor_category", "partial-ticket"),
+    ]
 
 
 def test_empty_database_warns(dsn):
@@ -189,3 +195,31 @@ def test_slow_statement_is_cancelled_by_the_timeout(dsn, monkeypatch):
     monkeypatch.setattr(adapter, "_ITEMS_SQL", "select pg_sleep(2)")
     with pytest.raises(psycopg.errors.QueryCanceled):
         PostgresCatalogRepository(dsn, statement_timeout_ms=100).load()
+
+
+def test_maps_region_and_descriptions(run, dsn):
+    add_item(run, "sample-described")
+    run(
+        "update quotes.pricing_items set region = 'Puno', description_es = 'Texto',"
+        " description_en = 'Text' where id = 'sample-described'"
+    )
+    add_item(run, "sample-bare")
+    load = PostgresCatalogRepository(dsn).load()
+    described = load.catalog.get_item("sample-described")
+    assert (described.region, described.description_es, described.description_en) == (
+        "Puno",
+        "Texto",
+        "Text",
+    )
+    bare = load.catalog.get_item("sample-bare")
+    assert (bare.region, bare.description_es, bare.description_en) == (None, None, None)
+    assert [i.code for i in load.warnings if i.subject_id == "sample-bare"] == [
+        "missing_description"
+    ]
+    assert load.ok
+
+
+def test_the_database_refuses_blank_descriptions(run):
+    add_item(run, "sample-blank")
+    with pytest.raises(psycopg.errors.CheckViolation):
+        run("update quotes.pricing_items set description_es = '  ' where id = 'sample-blank'")

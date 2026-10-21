@@ -32,7 +32,7 @@ _UNITS = {
 
 _ITEMS_SQL = """
     select id, category, name_es, name_en, unit::text as unit, price_pen, child_price_pen,
-           duration_days, notes
+           duration_days, notes, region, description_es, description_en
     from quotes.pricing_items
     where active
     order by id
@@ -94,6 +94,9 @@ def map_pricing_row(row: dict[str, Any]) -> CatalogEntry:
         name_en=row["name_en"],
         duration_days=row["duration_days"],
         notes=row["notes"],
+        region=row["region"],
+        description_es=row["description_es"],
+        description_en=row["description_en"],
     )
 
 

@@ -1,5 +1,7 @@
 import copy
 
+import pytest
+
 from quotes.infrastructure.catalog_draft import dump_draft, load_draft, validate_draft
 from tests.support.draft_fixture import mutate, valid_draft
 
@@ -150,3 +152,22 @@ def test_keys_written_by_the_tool_remain_allowed():
     draft["pricing_items"][0].update(source_name="S", needs_review=False, review_hint="h")
     draft["local_payments"][0].update(source_name="S", review_hint="h")
     assert problems(draft) == ()
+
+
+def test_region_and_descriptions_are_optional_and_reach_the_rows():
+    result = validate_draft(mutate(region="Puno", description_es="Texto", description_en=None))
+    assert result.problems == ()
+    first = result.item_rows[0]
+    assert (first["region"], first["description_es"], first["description_en"]) == (
+        "Puno",
+        "Texto",
+        None,
+    )
+    assert result.item_rows[1]["region"] is None
+
+
+@pytest.mark.parametrize("key", ["region", "description_es", "description_en"])
+@pytest.mark.parametrize("bad", ["  ", "", 7, "bell\x07"])
+def test_blank_or_non_text_region_and_descriptions_are_problems(key, bad):
+    found = problems(mutate(**{key: bad}))
+    assert any("alpha-tour" in p and key in p for p in found)

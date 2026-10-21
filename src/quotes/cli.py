@@ -25,7 +25,7 @@ from quotes.infrastructure.latex.pdf import (
     TectonicFailed,
     compile_pdf,
 )
-from quotes.infrastructure.latex.quote_renderer import LatexQuoteRenderer
+from quotes.infrastructure.latex.quote_renderer import LatexQuoteRenderer, itinerary_day_count
 from quotes.infrastructure.output_file import OutputExists, write_new_file
 from quotes.infrastructure.postgres_catalog import PostgresCatalogRepository
 from quotes.infrastructure.quote_request_file import InvalidRequestFile, read_quote_request
@@ -248,7 +248,7 @@ def _quote_build(
     print(f"  options: {len(quoted)}", file=out)
     print(f"  services: {sum(len(option.quote.lines) for option in quoted)}", file=out)
     print(f"  optional extras: {sum(len(option.quote.extras) for option in quoted)}", file=out)
-    print(f"  itinerary days: {sum(len(option.itinerary) for option in quoted)}", file=out)
+    print(f"  itinerary days: {sum(itinerary_day_count(option) for option in quoted)}", file=out)
     print(f"  paid locally: {len(quoted[0].quote.paid_locally)}", file=out)
     print(f"  language: {document.language.value}", file=out)
     return EXIT_OK

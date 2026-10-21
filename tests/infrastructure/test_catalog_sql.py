@@ -12,7 +12,7 @@ from quotes.infrastructure.catalog_sql import (
     quote_text,
     render_sql,
 )
-from tests.support.draft_fixture import NASTY, valid_draft
+from tests.support.draft_fixture import NASTY, mutate, valid_draft
 
 
 @pytest.mark.parametrize(
@@ -117,3 +117,19 @@ def test_renderer_and_validator_share_the_text_and_duration_rules():
     assert quote_text("tab\there\r\n") == "'tab\there\r\n'"
     with pytest.raises(SqlLiteralError):
         quote_int(366, maximum=365)
+
+
+def test_region_and_descriptions_are_inserted_through_the_text_quoter():
+    draft = mutate(region="Puno", description_es=NASTY, description_en=None)
+    sql = render(draft)
+    assert "region, description_es, description_en" in sql
+    assert "'Puno'" in sql and quote_text(NASTY) in sql
+
+
+def test_null_region_and_descriptions_never_erase_stored_values():
+    sql = render()
+    for column in ("region", "description_es", "description_en"):
+        assert f"{column} = coalesce(excluded.{column}, quotes.pricing_items.{column})" in sql
+    # every other column keeps the plain overwrite
+    assert "price_pen = excluded.price_pen" in sql
+    assert "notes = excluded.notes" in sql

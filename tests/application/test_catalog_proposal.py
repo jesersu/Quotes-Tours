@@ -93,6 +93,9 @@ def test_every_entry_needs_review_with_hint_and_defaults():
         assert entry["child_price_pen"] is None
         assert entry["active"] is True
         assert entry["notes"] is None
+        assert entry["region"] is None
+        assert entry["description_es"] is None
+        assert entry["description_en"] is None
     assert "child" in proposal.pricing_items[0]["review_hint"]
 
 
