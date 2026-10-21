@@ -8,12 +8,15 @@ import pytest
 
 from quotes.application.catalog import Catalog, CatalogEntry, LocalPaymentEntry
 from quotes.application.quote import (
+    ItineraryDay,
     Quote,
     QuotedOption,
+    QuoteOption,
     QuoteRequest,
     RequestedExtra,
     RequestedItem,
     build_quote,
+    build_quote_options,
 )
 from quotes.application.quote_rendering import Language, QuoteDocument, QuoteRenderer
 from quotes.domain.catalog import CatalogItem, PricingUnit
@@ -1031,6 +1034,154 @@ def test_a_several_options_quote_compiles_to_a_pdf(tmp_path):
     out = tmp_path / "options.pdf"
 
     compile_pdf(renderer().render(options_document(days=(1, 3))), out)
+
+    assert out.stat().st_size > 0
+
+
+# --- items assigned to days ---
+
+
+def itinerary_entries():
+    return [
+        entry("van", price="100.00", name_es="Furgoneta"),
+        entry("bed", PricingUnit.PER_DAY, "80.00", category="accommodation", name_es="Cama & más"),
+        entry("tour", PricingUnit.PER_PERSON, "50.00", category="activity", name_es="Visita"),
+        entry("balloon", PricingUnit.PER_PERSON, "333.00", category="activity"),
+    ]
+
+
+def placed_option(label=None, *, days=3, itinerary=None, extras=()) -> QuotedOption:
+    items = (
+        RequestedItem("van"),
+        RequestedItem("bed", on_days=(1, 2)),
+        RequestedItem("tour", on_days=(2,)),
+    )
+    request = QuoteRequest(days, Travelers(2), items, extras)
+    if itinerary is None:
+        itinerary = (ItineraryDay(1, "Arequipa - Chivay"), ItineraryDay(3, "Back & forth"))
+    built = QuoteOption(label, None, request, tuple(itinerary))
+    return build_quote_options((built,), Catalog(itinerary_entries(), []), POLICY)[0]
+
+
+def itinerary_text(option: QuotedOption, **overrides) -> str:
+    return renderer().render(doc_of([option], **overrides))
+
+
+def day_block(text: str, number: int, word: str = "Día") -> str:
+    start = text.index(f"\\dayhead{{{word} {number}}}")
+    following = text.find("\\dayhead{", start + 1)
+    return text[start : following if following != -1 else len(text)]
+
+
+def test_an_option_with_placements_gets_a_day_by_day_itinerary():
+    text = itinerary_text(placed_option())
+
+    assert "\\sect{Itinerario}" in text
+    assert "\\dayhead{Día 1}{Arequipa - Chivay}" in text
+    assert "\\dayhead{Día 2}{}" in text
+    assert "\\dayhead{Día 3}{Back \\& forth}" in text
+    assert text.count("\\dayhead{") == 3
+
+
+def test_each_day_lists_the_services_placed_on_it_in_request_order():
+    text = itinerary_text(placed_option())
+
+    assert "Cama \\& más" in day_block(text, 1)
+    assert "Visita" not in day_block(text, 1)
+    assert text.index("Cama \\& más", text.index("\\dayhead{Día 2}")) < text.index(
+        "Visita", text.index("\\dayhead{Día 2}")
+    )
+    assert "Cama" not in day_block(text, 3) and "Visita" not in day_block(text, 3)
+
+
+def test_unplaced_items_appear_only_in_the_services_table():
+    text = itinerary_text(placed_option())
+
+    assert text.count("Furgoneta") == 1
+    assert "Furgoneta" not in text[text.index("\\sect{Itinerario}") :]
+
+
+def test_the_itinerary_follows_the_prices_and_precedes_the_extras():
+    extras = (RequestedExtra("Globo uno", (RequestedItem("balloon"),)),)
+    text = itinerary_text(placed_option(extras=extras))
+
+    assert (
+        text.index("Precio total")
+        < text.index("\\sect{Itinerario}")
+        < text.index("\\sect{Opcionales}")
+    )
+
+
+def test_a_title_alone_is_enough_for_an_itinerary():
+    request = QuoteRequest(2, Travelers(2), (RequestedItem("van"),))
+    built = QuoteOption(None, None, request, (ItineraryDay(2, "Colca"),))
+    (option,) = build_quote_options((built,), Catalog(itinerary_entries(), []), POLICY)
+
+    text = itinerary_text(option)
+
+    assert "\\dayhead{Día 1}{}" in text
+    assert "\\dayhead{Día 2}{Colca}" in text
+
+
+def test_a_placement_alone_is_enough_for_an_itinerary():
+    text = itinerary_text(placed_option(itinerary=()))
+
+    assert "\\sect{Itinerario}" in text
+    assert "\\dayhead{Día 1}{}" in text
+
+
+def test_an_option_without_placement_or_titles_has_no_itinerary():
+    text = render(simple_quote())
+
+    assert "Itinerario" not in text
+    assert "\\dayhead" not in text
+
+
+def test_the_english_itinerary_uses_english_texts_and_service_names():
+    text = itinerary_text(placed_option(), language=EN)
+
+    assert "\\sect{Itinerary}" in text
+    assert "\\dayhead{Day 1}{Arequipa - Chivay}" in text
+    assert "Service bed" in day_block(text, 1, "Day")
+    assert "Itinerario" not in text
+    assert "\\dayhead{Día" not in text
+
+
+def test_only_the_options_that_have_an_itinerary_get_one():
+    plain = QuotedOption("Plain", None, simple_quote())
+    text = itinerary_text(plain, language=Language.SPANISH)
+    both = renderer().render(doc_of([placed_option("Placed"), plain]))
+
+    assert "Itinerario" not in text
+    assert both.count("\\sect{Itinerario}") == 1
+    assert both.index("\\sect{Itinerario}") < both.index("\\opthead{Plain}")
+
+
+def test_an_itinerary_never_prints_prices():
+    option = placed_option()
+    text = itinerary_text(option)
+
+    for quoted in option.quote.lines:
+        assert format_money(quoted.entry.item.unit_price) not in text
+
+
+def test_shared_blocks_appear_once_and_after_the_last_option():
+    document = options_document()
+    text = renderer().render(document)
+    last_option = text.index("Opción 2")
+    last_total = text.rindex("Precio total")
+
+    for marker in ("\\sect{Pagos en destino}", "\\keepsect{Nuestras credenciales}", "\\signature{"):
+        assert text.count(marker) == 1
+        assert text.index(marker) > last_option
+        assert text.index(marker) > last_total
+
+
+@needs_tectonic
+def test_a_quote_with_an_itinerary_compiles_to_a_pdf(tmp_path):
+    out = tmp_path / "itinerary.pdf"
+
+    compile_pdf(itinerary_text(placed_option()), out)
 
     assert out.stat().st_size > 0
 

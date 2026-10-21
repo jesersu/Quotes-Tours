@@ -10,6 +10,7 @@ from quotes.application.catalog import (
     LocalPaymentNotFound,
 )
 from quotes.application.quote import (
+    ItineraryDay,
     Quote,
     QuotedExtra,
     QuotedLine,
@@ -481,3 +482,101 @@ def test_an_unknown_id_in_any_option_raises_the_catalog_error():
     options = (option("A", ["van"]), option("B", ["ghost"]))
     with pytest.raises(CatalogItemNotFound):
         build_quote_options(options, make_catalog(), POLICY)
+
+
+# --- items assigned to days ---
+
+
+def priced_line(request_days, unit_item="hotel", **item_kwargs):
+    req = request(days=request_days, items=(RequestedItem(unit_item, **item_kwargs),))
+    return build_quote(req, make_catalog(), POLICY).lines[0].line
+
+
+def test_on_days_count_sets_the_priced_days_when_no_explicit_days():
+    assert priced_line(3, on_days=(1, 2)).quantity == 2
+    assert priced_line(3, on_days=(1, 2)) == priced_line(3, days=2)
+
+
+def test_explicit_item_days_win_over_on_days():
+    assert priced_line(3, days=1, on_days=(1, 2)).quantity == 1
+
+
+def test_without_on_days_the_request_days_apply():
+    assert priced_line(3).quantity == 3
+
+
+def test_per_group_items_ignore_days_even_when_placed():
+    placed = priced_line(3, on_days=(1, 2), unit_item="van")
+
+    assert placed == priced_line(3, unit_item="van")
+
+
+def test_on_days_are_stored_sorted_and_travel_with_the_quoted_line():
+    item = RequestedItem("hotel", on_days=[2, 1])
+    quote = build_quote(request(days=3, items=(item,)), make_catalog(), POLICY)
+
+    assert item.on_days == (1, 2)
+    assert quote.lines[0].on_days == (1, 2)
+
+
+def test_items_default_to_no_placement():
+    assert RequestedItem("van").on_days == ()
+
+
+@pytest.mark.parametrize("on_days", [[0], [-1], [1, 1], "12", [True], [1.5], 3, ["1"]])
+def test_requested_item_rejects_invalid_on_days(on_days):
+    with pytest.raises(InvalidPricingInput, match="on_days"):
+        RequestedItem("van", on_days=on_days)
+
+
+def test_on_days_beyond_the_request_days_are_rejected():
+    with pytest.raises(InvalidPricingInput, match="on_days"):
+        request(days=2, items=(RequestedItem("van", on_days=(1, 3)),))
+
+
+def test_extra_items_cannot_be_placed_on_days():
+    with pytest.raises(InvalidPricingInput, match="on_days"):
+        RequestedExtra("Upgrade", (RequestedItem("van", on_days=(1,)),))
+
+
+def test_itinerary_day_title_is_trimmed_and_must_be_text():
+    assert ItineraryDay(1, "  Arequipa - Chivay ").title == "Arequipa - Chivay"
+    for title in ("", "   ", 5, None):
+        with pytest.raises(InvalidPricingInput, match="title"):
+            ItineraryDay(1, title)
+
+
+@pytest.mark.parametrize("day", [0, -1, True, 1.5, "1"])
+def test_itinerary_day_number_must_be_a_positive_integer(day):
+    with pytest.raises(InvalidPricingInput, match="day"):
+        ItineraryDay(day, "Title")
+
+
+def test_an_option_keeps_its_sorted_itinerary_and_it_reaches_the_quoted_option():
+    itinerary = [ItineraryDay(2, "Second"), ItineraryDay(1, "First")]
+    built = QuoteOption("A", None, request(days=2), itinerary)
+
+    (quoted,) = build_quote_options((built,), make_catalog(), POLICY)
+
+    assert [d.day for d in built.itinerary] == [1, 2]
+    assert quoted.itinerary == built.itinerary
+
+
+def test_an_option_has_no_itinerary_by_default():
+    assert QuoteOption("A", None, request()).itinerary == ()
+
+
+def test_itinerary_days_must_lie_within_the_option_days():
+    with pytest.raises(InvalidPricingInput, match="itinerary"):
+        QuoteOption("A", None, request(days=2), (ItineraryDay(3, "Late"),))
+
+
+def test_itinerary_days_must_be_unique():
+    days = (ItineraryDay(1, "One"), ItineraryDay(1, "Again"))
+    with pytest.raises(InvalidPricingInput, match="itinerary"):
+        QuoteOption("A", None, request(days=2), days)
+
+
+def test_itinerary_must_contain_itinerary_days():
+    with pytest.raises(InvalidPricingInput, match="itinerary"):
+        QuoteOption("A", None, request(days=2), ("nope",))

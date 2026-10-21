@@ -49,16 +49,33 @@ def _require_items(label: str, items: tuple[object, ...]) -> None:
 
 @dataclass(frozen=True)
 class RequestedItem:
-    """A catalog item to quote. ``days`` overrides the request's days for this line only."""
+    """A catalog item to quote.
+
+    ``days`` overrides the request's days for this line only. ``on_days`` places the item in the
+    itinerary and, when ``days`` is not given, sets how many days it is priced for.
+    """
 
     item_id: str
     days: int | None = None
     quantity: int | None = None  # passed to the domain as the explicit PER_UNIT quantity
+    on_days: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         _require_text("Item id", self.item_id)
         _require_positive_or_none("Item days", self.days)
         _require_positive_or_none("Item quantity", self.quantity)
+        on_days = _as_tuple("Item on_days", self.on_days)
+        if not all(_is_int(day) and day >= 1 for day in on_days):
+            raise InvalidPricingInput("Item on_days must be integers of at least 1")
+        if len(set(on_days)) != len(on_days):
+            raise InvalidPricingInput("Item on_days must not repeat a day")
+        object.__setattr__(self, "on_days", tuple(sorted(on_days)))
+
+    def priced_days(self, request_days: int) -> int:
+        """Explicit days, else the number of placed days, else the request's days."""
+        if self.days is not None:
+            return self.days
+        return len(self.on_days) or request_days
 
 
 @dataclass(frozen=True)
@@ -74,6 +91,8 @@ class RequestedExtra:
         object.__setattr__(self, "label", self.label.strip())
         object.__setattr__(self, "items", _as_tuple("Extra items", self.items))
         _require_items("Extra", self.items)
+        if any(item.on_days for item in self.items):
+            raise InvalidPricingInput("Extra items cannot have on_days; extras are not itinerary")
 
 
 @dataclass(frozen=True)
@@ -93,6 +112,11 @@ class QuoteRequest:
         object.__setattr__(self, "extras", _as_tuple("Extras", self.extras))
         object.__setattr__(self, "paid_locally", _as_tuple("Paid-locally ids", self.paid_locally))
         _require_items("Quote", self.items)
+        for item in self.items:
+            if item.on_days and item.on_days[-1] > self.days:
+                raise InvalidPricingInput(
+                    f"Item on_days must lie within the {self.days} days of the quote"
+                )
         if not all(isinstance(extra, RequestedExtra) for extra in self.extras):
             raise InvalidPricingInput("Extras must contain only requested extras")
         for local_id in self.paid_locally:
@@ -108,6 +132,7 @@ class QuotedLine:
 
     entry: CatalogEntry
     line: QuoteLine
+    on_days: tuple[int, ...] = ()  # days of the itinerary this line is placed on
 
 
 @dataclass(frozen=True)
@@ -127,15 +152,31 @@ class Quote:
 
 
 @dataclass(frozen=True)
+class ItineraryDay:
+    """The owner's title for one day of the trip, such as ``Arequipa - Chivay``."""
+
+    day: int
+    title: str
+
+    def __post_init__(self) -> None:
+        if not _is_int(self.day) or self.day < 1:
+            raise InvalidPricingInput("Itinerary day must be an integer of at least 1")
+        _require_text("Itinerary title", self.title)
+        object.__setattr__(self, "title", self.title.strip())
+
+
+@dataclass(frozen=True)
 class QuoteOption:
     """One priced alternative of a quote: a request with an optional label and subtitle.
 
-    A label of ``None`` is only for the single unlabeled option of a plain quote.
+    A label of ``None`` is only for the single unlabeled option of a plain quote. The itinerary
+    holds the day titles the owner wrote; the services placed on each day come from the request.
     """
 
     label: str | None
     subtitle: str | None
     request: QuoteRequest
+    itinerary: tuple[ItineraryDay, ...] = ()
 
     def __post_init__(self) -> None:
         if self.label is not None:
@@ -147,6 +188,17 @@ class QuoteOption:
             object.__setattr__(self, "subtitle", self.subtitle.strip() or None)
         if not isinstance(self.request, QuoteRequest):
             raise InvalidPricingInput("Option request must be a QuoteRequest")
+        itinerary = _as_tuple("Option itinerary", self.itinerary)
+        if not all(isinstance(day, ItineraryDay) for day in itinerary):
+            raise InvalidPricingInput("Option itinerary must contain only itinerary days")
+        numbers = [day.day for day in itinerary]
+        if len(set(numbers)) != len(numbers):
+            raise InvalidPricingInput("Option itinerary must not repeat a day")
+        if numbers and max(numbers) > self.request.days:
+            raise InvalidPricingInput(
+                f"Option itinerary days must lie within the {self.request.days} days of the option"
+            )
+        object.__setattr__(self, "itinerary", tuple(sorted(itinerary, key=lambda d: d.day)))
 
 
 @dataclass(frozen=True)
@@ -154,6 +206,7 @@ class QuotedOption:
     label: str | None
     subtitle: str | None
     quote: Quote
+    itinerary: tuple[ItineraryDay, ...] = ()
 
 
 def _quote_lines(
@@ -162,9 +215,10 @@ def _quote_lines(
     quoted = []
     for item in requested:
         entry = catalog.get_item(item.item_id)
-        days = item.days if item.days is not None else request.days
-        line = build_line(entry.item, days, request.travelers, item.quantity)
-        quoted.append(QuotedLine(entry, line))
+        line = build_line(
+            entry.item, item.priced_days(request.days), request.travelers, item.quantity
+        )
+        quoted.append(QuotedLine(entry, line, item.on_days))
     return tuple(quoted)
 
 
@@ -223,6 +277,11 @@ def build_quote_options(
         raise InvalidPricingInput("Options must contain only quote options")
     check_option_labels(option.label for option in options)
     return tuple(
-        QuotedOption(option.label, option.subtitle, build_quote(option.request, catalog, policy))
+        QuotedOption(
+            option.label,
+            option.subtitle,
+            build_quote(option.request, catalog, policy),
+            option.itinerary,
+        )
         for option in options
     )

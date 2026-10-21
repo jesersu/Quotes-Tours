@@ -21,6 +21,9 @@ pricing:
 #   - label: Option 1
 #     subtitle: Ends in Puno   # optional
 #     days: 3                  # optional, defaults to the request days
+#     itinerary:               # optional, belongs to this option
+#       - day: 1
+#         title: Arequipa - Puno
 #     items:
 #       - id: van
 #     extras:                  # optional, belongs to this option
@@ -31,10 +34,18 @@ pricing:
 #     items:
 #       - id: van
 #       - id: guide
+# Optional day titles. With `on_days` on an item or any title here, the document adds an
+# itinerary section: for each day, your title and the names of the services placed on it.
+itinerary:
+  - day: 1
+    title: Arequipa - Chivay
+  - day: 2
+    title: Colca Canyon - Arequipa
 items:
   - id: van
   - id: guide
     days: 1             # optional, overrides the request days for this item
+    on_days: [1]        # optional, places the item on these days of the itinerary
   - id: bus-seat
     quantity: 3         # optional, for per-unit items
 extras:                 # optional

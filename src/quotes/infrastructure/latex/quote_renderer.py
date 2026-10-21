@@ -32,6 +32,8 @@ class _Texts:
     date_pattern: str
     prepared_for: str
     day: tuple[str, str]
+    itinerary: str
+    day_label: str
     adult: tuple[str, str]
     child: tuple[str, str]
     included: str
@@ -76,6 +78,8 @@ _SPANISH = _Texts(
     ),
     prepared_for="Preparado para",
     day=("día", "días"),
+    itinerary="Itinerario",
+    day_label="Día",
     adult=("adulto", "adultos"),
     child=("niño", "niños"),
     included="Servicios incluidos",
@@ -135,6 +139,8 @@ _ENGLISH = _Texts(
     ),
     prepared_for="Prepared for",
     day=("day", "days"),
+    itinerary="Itinerary",
+    day_label="Day",
     adult=("adult", "adults"),
     child=("child", "children"),
     included="Included services",
@@ -281,6 +287,30 @@ def _price_table(breakdown: PriceBreakdown, texts: _Texts) -> str:
     return "\n".join(rows)
 
 
+def _has_itinerary(option: QuotedOption) -> bool:
+    return bool(option.itinerary) or any(quoted.on_days for quoted in option.quote.lines)
+
+
+def _itinerary_section(option: QuotedOption, texts: _Texts) -> list[str]:
+    """Every day of the option with the owner's title and the names of the services placed on it.
+
+    Names only: the itinerary never repeats the basis or any price of the services table.
+    """
+    titles = {day.day: day.title for day in option.itinerary}
+    parts = [f"\\sect{{{texts.itinerary}}}"]
+    for day in range(1, option.quote.request.days + 1):
+        title = escape_latex(titles.get(day, ""))
+        # The header needs room for its first lines, or it would end a page alone.
+        parts.append("\\Needspace*{4\\baselineskip}")
+        parts.append(f"\\dayhead{{{texts.day_label} {day}}}{{{title}}}")
+        parts.extend(
+            f"\\noindent {escape_latex(_service_name(quoted, texts))}\\par"
+            for quoted in option.quote.lines
+            if day in quoted.on_days
+        )
+    return parts
+
+
 def _extras_section(quote: Quote, texts: _Texts) -> list[str]:
     parts = [f"\\sect{{{texts.optional}}}"]
     for extra in quote.extras:
@@ -372,7 +402,7 @@ class LatexQuoteRenderer:
         for option in options:
             if labeled:
                 parts += self._option_heading(document, option, texts)
-            parts += self._option_body(option.quote, texts)
+            parts += self._option_body(option, texts)
         # Paid-locally items are shared by every option, so they appear once.
         if (shared := options[0].quote).paid_locally:
             parts += _local_payments_section(shared, texts)
@@ -391,13 +421,16 @@ class LatexQuoteRenderer:
             parts.append(f"\\noindent {_plural(option.quote.request.days, texts.day)}\\par")
         return parts
 
-    def _option_body(self, quote: Quote, texts: _Texts) -> list[str]:
+    def _option_body(self, option: QuotedOption, texts: _Texts) -> list[str]:
+        quote = option.quote
         parts = [
             f"\\sect{{{texts.included}}}",
             _services_table(quote.lines, texts),
             "\\par\\medskip",
             _price_table(quote.breakdown, texts),
         ]
+        if _has_itinerary(option):
+            parts += _itinerary_section(option, texts)
         if quote.extras:
             parts += _extras_section(quote, texts)
         return parts

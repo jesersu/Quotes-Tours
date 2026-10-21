@@ -99,6 +99,8 @@ These were confirmed by the business owner and are easy to break by "fixing" the
   free on everything. Children 6-15 are free on `PER_GROUP`/`PER_DAY` items and use
   `child_unit_price` on `PER_PERSON` items when present, otherwise the adult price.
 - Per-person reference prices divide by `Travelers.full_fare_count` (adults), not all travelers.
+- An item's priced days are its explicit `days`, else the number of its `on_days` (the itinerary
+  days it is placed on), else the quote's days. `PER_GROUP` items ignore days as before.
 - Optional extras are priced separately with the same margin, never rounded, never added to the
   main total.
 - Paid-locally items (`LocalPaymentInfo`, e.g. the Colca tourist ticket by visitor category) are
