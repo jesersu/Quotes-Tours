@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from quotes.application.catalog import LocalPaymentEntry
-from quotes.application.quote import QuotedLine
+from quotes.application.quote import Quote, QuotedLine, QuotedOption
 from quotes.application.quote_rendering import Language, QuoteDocument
 from quotes.domain.catalog import PricingUnit
 from quotes.domain.local_payment import VisitorCategory
@@ -197,12 +197,17 @@ def _plural(count: int, forms: tuple[str, str]) -> str:
     return f"{count} {forms[0] if count == 1 else forms[1]}"
 
 
+def _days_vary(document: QuoteDocument) -> bool:
+    return len({option.quote.request.days for option in document.options}) > 1
+
+
 def _trip_summary(document: QuoteDocument, texts: _Texts) -> str:
-    request = document.quote.request
-    parts = [
-        _plural(request.days, texts.day),
-        _plural(request.travelers.adults, texts.adult),
-    ]
+    # Travelers are shared by every option. Days are printed here only when they are the same
+    # for all of them; otherwise each option states its own under its heading.
+    request = document.options[0].quote.request
+    parts = [_plural(request.travelers.adults, texts.adult)]
+    if not _days_vary(document):
+        parts.insert(0, _plural(request.days, texts.day))
     children = len(request.travelers.child_ages)
     if children:
         parts.append(_plural(children, texts.child))
@@ -276,9 +281,9 @@ def _price_table(breakdown: PriceBreakdown, texts: _Texts) -> str:
     return "\n".join(rows)
 
 
-def _extras_section(document: QuoteDocument, texts: _Texts) -> list[str]:
+def _extras_section(quote: Quote, texts: _Texts) -> list[str]:
     parts = [f"\\sect{{{texts.optional}}}"]
-    for extra in document.quote.extras:
+    for extra in quote.extras:
         # Each extra reads as one unit, so its label, services and prices share a page.
         parts.append(f"\\par\\medskip\\noindent\\textbf{{{escape_latex(extra.label)}}}\\par")
         parts.append(_KEEP_WITH_NEXT)
@@ -306,11 +311,12 @@ def _local_price_rows(local: LocalPaymentEntry, texts: _Texts) -> list[str]:
     return [f"{labels[price.category]} & {format_money(price.price)} \\\\" for price in prices]
 
 
-def _local_payments_section(document: QuoteDocument, texts: _Texts) -> list[str]:
+def _local_payments_section(quote: Quote, texts: _Texts) -> list[str]:
     parts = [f"\\sect{{{texts.paid_on_site}}}"]
-    for local in document.quote.paid_locally:
+    for local in quote.paid_locally:
         name = local.name_en if texts.lang is Language.ENGLISH else local.name_es
         parts.append(f"\\par\\medskip\\noindent\\textbf{{{escape_latex(name)}}}\\par")
+        parts.append(_KEEP_WITH_NEXT)
         rows = [_PRICE_TABLE_OPEN, *_local_price_rows(local, texts), _TABLE_CLOSE]
         parts.append("\n".join(rows))
     parts.append(f"\\notebox{{{texts.local_note}}}")
@@ -352,7 +358,7 @@ class LatexQuoteRenderer:
         return lines
 
     def _body(self, document: QuoteDocument, texts: _Texts) -> list[str]:
-        quote = document.quote
+        options = document.options
         parts = [
             "\\letterhead",
             "\\par\\vspace{1em}\\noindent"
@@ -361,17 +367,37 @@ class LatexQuoteRenderer:
             f"\\textbf{{{escape_latex(document.client_name)}}}\\par",
             f"\\noindent {texts.date(document.issued_on)}\\par",
             f"\\noindent {_trip_summary(document, texts)}\\par",
+        ]
+        labeled = len(options) > 1 or options[0].label is not None
+        for option in options:
+            if labeled:
+                parts += self._option_heading(document, option, texts)
+            parts += self._option_body(option.quote, texts)
+        # Paid-locally items are shared by every option, so they appear once.
+        if (shared := options[0].quote).paid_locally:
+            parts += _local_payments_section(shared, texts)
+        parts += [
+            f"\\keepsect{{{texts.credentials}}}{{\\credentials}}",
+            f"\\signature{{{escape_latex(document.signed_by)}}}",
+        ]
+        return parts
+
+    def _option_heading(
+        self, document: QuoteDocument, option: QuotedOption, texts: _Texts
+    ) -> list[str]:
+        subtitle = escape_latex(option.subtitle or "")
+        parts = [f"\\opthead{{{escape_latex(option.label)}}}{{{subtitle}}}"]
+        if _days_vary(document):
+            parts.append(f"\\noindent {_plural(option.quote.request.days, texts.day)}\\par")
+        return parts
+
+    def _option_body(self, quote: Quote, texts: _Texts) -> list[str]:
+        parts = [
             f"\\sect{{{texts.included}}}",
             _services_table(quote.lines, texts),
             "\\par\\medskip",
             _price_table(quote.breakdown, texts),
         ]
         if quote.extras:
-            parts += _extras_section(document, texts)
-        if quote.paid_locally:
-            parts += _local_payments_section(document, texts)
-        parts += [
-            f"\\keepsect{{{texts.credentials}}}{{\\credentials}}",
-            f"\\signature{{{escape_latex(document.signed_by)}}}",
-        ]
+            parts += _extras_section(quote, texts)
         return parts

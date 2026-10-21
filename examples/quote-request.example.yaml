@@ -13,6 +13,24 @@ pricing:
   margin_rate: "0.25"   # required; a plain YAML number is read as text too, never as a float
   fx_rate: "3.5"        # optional, default 3.5
   usd_rounding_step: "5"  # optional, default none
+# One quote with a single programme uses top-level `items` and `extras` (below). To offer several
+# programmes in the same document, drop them and list `options` instead. Travelers, pricing and
+# paid_locally are shared; `days` above is the default for an option without its own `days`.
+#
+# options:
+#   - label: Option 1
+#     subtitle: Ends in Puno   # optional
+#     days: 3                  # optional, defaults to the request days
+#     items:
+#       - id: van
+#     extras:                  # optional, belongs to this option
+#       - label: Horseback ride
+#         items:
+#           - id: horse
+#   - label: Option 2          # labels must be unique
+#     items:
+#       - id: van
+#       - id: guide
 items:
   - id: van
   - id: guide

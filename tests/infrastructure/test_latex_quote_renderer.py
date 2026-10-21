@@ -9,6 +9,7 @@ import pytest
 from quotes.application.catalog import Catalog, CatalogEntry, LocalPaymentEntry
 from quotes.application.quote import (
     Quote,
+    QuotedOption,
     QuoteRequest,
     RequestedExtra,
     RequestedItem,
@@ -413,6 +414,12 @@ def test_paid_locally_section_is_absent_without_entries():
     assert "Pagos en destino" not in render(simple_quote())
 
 
+def test_paid_locally_keeps_each_name_with_its_prices():
+    text = render(quote_of([entry("van")], local=[local_entry("ticket")]))
+
+    assert "\\textbf{Boleto turístico}\\par\n\\par\\nopagebreak\n\\noindent" in text
+
+
 def test_paid_locally_shows_reference_prices_by_visitor_category():
     text = render(quote_of([entry("van")], local=[local_entry("ticket")]))
 
@@ -605,6 +612,7 @@ Referencia en dólares, por adulto & US\$ 178.40 \\
 \notebox{Los servicios opcionales no están incluidos en el total anterior; se cotizan por separado.}
 \sect{Pagos en destino}
 \par\medskip\noindent\textbf{Boleto turístico}\par
+\par\nopagebreak
 \noindent
 \begin{tabularx}{\linewidth}{@{}Xr@{}}
 Adulto latinoamericano & S/ 31.00 \\
@@ -913,6 +921,116 @@ def test_full_english_quote_compiles_to_a_pdf(tmp_path):
     out = tmp_path / "quote-en.pdf"
 
     compile_pdf(text, out)
+
+    assert out.stat().st_size > 0
+
+
+# --- several options --------------------------------------------------------
+
+
+def options_document(
+    *, language: Language = Language.SPANISH, days: tuple[int, int] = (2, 2), **overrides
+) -> QuoteDocument:
+    entries = [
+        entry("van", price="100.00", name_es="Furgoneta"),
+        entry("bed", PricingUnit.PER_DAY, "80.00", category="accommodation", name_es="Cama"),
+        entry("balloon", PricingUnit.PER_PERSON, "333.00", category="activity"),
+    ]
+    local = [local_entry("ticket")]
+    first = quote_of(
+        entries,
+        ["van"],
+        days=days[0],
+        extras=(RequestedExtra("Globo uno", (RequestedItem("balloon"),)),),
+        local=local,
+    )
+    second = quote_of(entries, ["van", "bed"], days=days[1], local=local)
+    options = (
+        QuotedOption("Opción 1 & Puno", "Termina en Puno", first),
+        QuotedOption("Opción 2", None, second),
+    )
+    return doc_of(options, language=language, **overrides)
+
+
+def test_one_unlabeled_option_renders_exactly_like_the_plain_quote():
+    quote = simple_quote()
+
+    assert render([QuotedOption(None, None, quote)]) == render(quote)
+
+
+def test_several_options_each_get_a_header_services_and_prices():
+    document = options_document()
+
+    text = renderer().render(document)
+
+    first, second = (o.quote for o in document.options)
+    assert "\\opthead{Opción 1 \\& Puno}{Termina en Puno}" in text
+    assert "\\opthead{Opción 2}{}" in text
+    assert text.index("Opción 1") < text.index("Furgoneta") < text.index("Opción 2")
+    assert text.index("Opción 2") < text.index("Cama")
+    assert "Cama" not in text[: text.index("Opción 2")]
+    for quote in (first, second):
+        assert format_money(quote.breakdown.final_pen) in text
+        assert format_money(quote.breakdown.per_adult_pen) in text
+    assert text.count("Precio total") == 3  # two options and the one extra
+
+
+def test_extras_belong_to_their_option_and_shared_blocks_appear_once():
+    text = renderer().render(options_document())
+
+    assert text.index("Globo uno") < text.index("Opción 2")
+    assert text.count("\\sect{Opcionales}") == 1
+    assert text.count("\\sect{Pagos en destino}") == 1
+    assert text.count("\\keepsect{Nuestras credenciales}") == 1
+    assert text.count("\\signature{") == 1
+    assert text.index("\\sect{Pagos en destino}") > text.index("Cama")
+
+
+def test_the_english_options_use_english_texts():
+    text = renderer().render(options_document(language=EN))
+
+    assert "\\opthead{Opción 1 \\& Puno}{Termina en Puno}" in text
+    assert "Included services" in text
+    assert "Total price" in text
+    assert "Servicios incluidos" not in text
+
+
+def test_the_summary_keeps_the_days_when_every_option_has_the_same():
+    text = renderer().render(options_document())
+
+    assert "\\noindent 2 días, 2 adultos\\par" in text
+
+
+def test_the_summary_drops_the_days_and_each_option_shows_its_own_when_they_differ():
+    text = renderer().render(options_document(days=(1, 3)))
+
+    assert "\\noindent 2 adultos\\par" in text
+    assert "\\noindent 1 día\\par" in text
+    assert "\\noindent 3 días\\par" in text
+    assert text.index("1 día\\par") < text.index("Opción 2") < text.index("3 días\\par")
+
+
+def test_a_single_labeled_option_still_gets_its_header():
+    text = render([QuotedOption("Solo", "Sub", simple_quote())])
+
+    assert "\\opthead{Solo}{Sub}" in text
+
+
+@pytest.mark.parametrize("language", [Language.SPANISH, Language.ENGLISH])
+def test_only_totals_and_per_adult_prices_reach_a_several_options_document(language):
+    document = options_document(language=language)
+    text = renderer().render(document)
+
+    for option in document.options:
+        for line in option.quote.lines:
+            assert format_money(line.entry.item.unit_price) not in text
+
+
+@needs_tectonic
+def test_a_several_options_quote_compiles_to_a_pdf(tmp_path):
+    out = tmp_path / "options.pdf"
+
+    compile_pdf(renderer().render(options_document(days=(1, 3))), out)
 
     assert out.stat().st_size > 0
 

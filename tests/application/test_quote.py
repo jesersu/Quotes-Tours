@@ -13,10 +13,13 @@ from quotes.application.quote import (
     Quote,
     QuotedExtra,
     QuotedLine,
+    QuotedOption,
+    QuoteOption,
     QuoteRequest,
     RequestedExtra,
     RequestedItem,
     build_quote,
+    build_quote_options,
 )
 from quotes.domain.catalog import CatalogItem, PricingUnit, QuoteLine
 from quotes.domain.errors import InvalidPricingInput
@@ -381,3 +384,100 @@ def test_extra_label_is_trimmed_and_still_matched_to_its_breakdown():
 
     assert padded.extras[0].label == "Upgrade"
     assert [extra.label for extra in quote.extras] == ["Upgrade"]
+
+
+# --- several options ---
+
+
+def option(label, items, **overrides) -> QuoteOption:
+    return QuoteOption(
+        label,
+        overrides.pop("subtitle", None),
+        request(items=tuple(RequestedItem(i) for i in items), **overrides),
+    )
+
+
+def test_each_option_is_priced_alone_with_the_shared_policy():
+    catalog = make_catalog()
+    first = option("Option 1", ["van"], paid_locally=("ticket",))
+    second = option("Option 2", ["van", "hotel"], paid_locally=("ticket",))
+
+    quoted = build_quote_options((first, second), catalog, POLICY)
+
+    assert all(isinstance(q, QuotedOption) for q in quoted)
+    assert [q.label for q in quoted] == ["Option 1", "Option 2"]
+    assert quoted[0].quote == build_quote(first.request, catalog, POLICY)
+    assert quoted[1].quote == build_quote(second.request, catalog, POLICY)
+    assert quoted[0].quote.breakdown.final_pen != quoted[1].quote.breakdown.final_pen
+    assert quoted[0].quote.paid_locally == quoted[1].quote.paid_locally
+
+
+def test_options_keep_their_own_days_and_subtitles():
+    catalog = make_catalog()
+    short = QuoteOption("Short", "Ends in Puno", request(days=1, items=(RequestedItem("hotel"),)))
+    long = QuoteOption("Long", None, request(days=3, items=(RequestedItem("hotel"),)))
+
+    quoted = build_quote_options((short, long), catalog, POLICY)
+
+    assert quoted[0].subtitle == "Ends in Puno"
+    assert quoted[1].subtitle is None
+    assert quoted[0].quote.breakdown.final_pen.amount < quoted[1].quote.breakdown.final_pen.amount
+
+
+def test_a_single_unlabeled_option_is_the_plain_quote():
+    catalog = make_catalog()
+    only = QuoteOption(None, None, request())
+
+    (quoted,) = build_quote_options((only,), catalog, POLICY)
+
+    assert quoted.label is None
+    assert quoted.quote == build_quote(only.request, catalog, POLICY)
+
+
+def test_option_label_and_subtitle_are_trimmed():
+    built = QuoteOption("  Option 1 ", "  Puno  ", request())
+
+    assert (built.label, built.subtitle) == ("Option 1", "Puno")
+
+
+def test_a_blank_subtitle_is_allowed_and_means_none():
+    assert QuoteOption("A", "   ", request()).subtitle is None
+
+
+@pytest.mark.parametrize("label", ["", "   ", 5])
+def test_an_option_label_must_be_text_or_none(label):
+    with pytest.raises(InvalidPricingInput, match="label"):
+        QuoteOption(label, None, request())
+
+
+def test_an_option_needs_a_quote_request():
+    with pytest.raises(InvalidPricingInput, match="request"):
+        QuoteOption("A", None, "nope")
+
+
+def test_no_options_is_rejected():
+    with pytest.raises(InvalidPricingInput, match="at least one"):
+        build_quote_options((), make_catalog(), POLICY)
+
+
+def test_several_options_must_all_be_labeled():
+    options = (option("A", ["van"]), QuoteOption(None, None, request()))
+    with pytest.raises(InvalidPricingInput, match="label"):
+        build_quote_options(options, make_catalog(), POLICY)
+
+
+def test_option_labels_must_be_unique_after_trimming():
+    options = (option("A", ["van"]), option(" A ", ["hotel"]))
+    with pytest.raises(InvalidPricingInput, match="unique"):
+        build_quote_options(options, make_catalog(), POLICY)
+
+
+def test_options_must_be_quote_options():
+    with pytest.raises(InvalidPricingInput, match="options"):
+        build_quote_options((request(),), make_catalog(), POLICY)
+
+
+def test_an_unknown_id_in_any_option_raises_the_catalog_error():
+    options = (option("A", ["van"]), option("B", ["ghost"]))
+    with pytest.raises(CatalogItemNotFound):
+        build_quote_options(options, make_catalog(), POLICY)
