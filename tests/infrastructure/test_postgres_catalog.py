@@ -178,7 +178,11 @@ def test_partially_priced_local_item_is_kept_with_a_warning(run, dsn):
     loaded = PostgresCatalogRepository(dsn).load()
     assert [e.id for e in loaded.catalog.local_payments()] == ["partial-ticket"]
     assert loaded.errors == ()
-    assert [i.code for i in loaded.warnings] == ["missing_visitor_category"]
+    # good-item has no description, so it warns too.
+    assert [(i.code, i.subject_id) for i in loaded.warnings] == [
+        ("missing_description", "good-item"),
+        ("missing_visitor_category", "partial-ticket"),
+    ]
 
 
 def test_empty_database_warns(dsn):
