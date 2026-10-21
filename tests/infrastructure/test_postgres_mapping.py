@@ -27,9 +27,30 @@ def pricing_row(**overrides):
         "child_price_pen": None,
         "duration_days": None,
         "notes": None,
+        "region": None,
+        "description_es": None,
+        "description_en": None,
     }
     row.update(overrides)
     return row
+
+
+def test_maps_region_and_descriptions_including_nulls():
+    full = map_pricing_row(
+        pricing_row(region="Puno", description_es="Texto", description_en="Text")
+    )
+    assert (full.region, full.description_es, full.description_en) == ("Puno", "Texto", "Text")
+    bare = map_pricing_row(pricing_row())
+    assert (bare.region, bare.description_es, bare.description_en) == (None, None, None)
+
+
+def test_build_load_reports_a_blank_description_as_a_row_error():
+    loaded = build_catalog_load(
+        [pricing_row(id="good"), pricing_row(id="bad", description_es="  ")], [], []
+    )
+    assert [e.id for e in loaded.catalog.items()] == ["good"]
+    (issue,) = loaded.errors
+    assert (issue.code, issue.subject_id) == ("invalid_row", "bad")
 
 
 def test_maps_a_valid_pricing_row():
@@ -130,7 +151,8 @@ def test_build_load_excludes_a_local_item_without_prices():
 
 
 def test_build_load_keeps_a_partially_priced_local_item_with_a_warning():
-    loaded = build_catalog_load([pricing_row()], [local_row()], [price_row()])
+    described = pricing_row(description_es="Texto", description_en="Text")
+    loaded = build_catalog_load([described], [local_row()], [price_row()])
     assert [e.id for e in loaded.catalog.local_payments()] == ["sample-ticket"]
     assert loaded.errors == ()
     (issue,) = loaded.warnings

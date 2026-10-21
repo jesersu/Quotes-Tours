@@ -43,6 +43,9 @@ _PRICING_KEYS = (
     "child_price_pen",
     "active",
     "notes",
+    "region",
+    "description_es",
+    "description_en",
     *_TOOL_KEYS,
 )
 _LOCAL_KEYS = ("id", "name_es", "name_en", "prices", "active", "notes", *_TOOL_KEYS)
@@ -55,6 +58,8 @@ HEADER = """\
 #     category, child_price_pen, ...), follow review_hint, then set needs_review: false.
 #   - Local payments (paid by the tourist on site, information only) need all three prices.
 #   - Keep price_pen as a quoted string with two decimals, for example "12.34".
+#   - region, description_es and description_en are optional owner-written text (or null).
+#     A null never erases a value already stored in the database when the SQL is applied.
 #   - source_name is the original spreadsheet text, kept for reference only.
 """
 
@@ -119,6 +124,17 @@ def _text(entry: Mapping[str, Any], key: str, label: str, problems: list[str]) -
     return value
 
 
+def _optional_text(entry: Mapping[str, Any], key: str, label: str, problems: list[str]) -> Any:
+    value = entry.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        problems.append(f"{label}: {key} must be null or non-empty text")
+    elif not is_safe_text(value):
+        problems.append(f"{label}: {key} contains a NUL or other control character")
+    return value
+
+
 def _check_common(
     entry: Any, label: str, seen: set[str], problems: list[str]
 ) -> tuple[str | None, bool]:
@@ -171,6 +187,8 @@ def _pricing_row(entry: Mapping[str, Any], label: str, problems: list[str]) -> d
         )
     row["duration_days"] = days
     row["notes"] = entry.get("notes")
+    for key in ("region", "description_es", "description_en"):
+        row[key] = _optional_text(entry, key, label, problems)
     row["active"] = entry.get("active", True)
     return row
 

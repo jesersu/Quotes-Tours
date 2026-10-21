@@ -1246,3 +1246,61 @@ def test_a_name_starting_with_a_bracket_is_not_read_as_a_row_option(tmp_path):
 
     assert result.returncode == 0, result.stderr[-2000:]
     assert (tmp_path / "doc.pdf").stat().st_size > 0
+
+
+# --- descriptions under each day ---
+
+
+def described_option(**fields) -> QuotedOption:
+    entries = [
+        entry("van", price="100.00", name_es="Furgoneta"),
+        CatalogEntry(
+            CatalogItem("tour", "Item tour", pen("50.00"), PricingUnit.PER_PERSON),
+            "activity",
+            "Visita",
+            "Tour",
+            **fields,
+        ),
+    ]
+    request = QuoteRequest(
+        2, Travelers(2), (RequestedItem("van"), RequestedItem("tour", on_days=(2,)))
+    )
+    built = QuoteOption(None, None, request, ())
+    return build_quote_options((built,), Catalog(entries, []), POLICY)[0]
+
+
+def test_a_placed_service_shows_its_description_in_the_document_language():
+    option = described_option(description_es="Paseo por el cañón", description_en="Canyon walk")
+
+    spanish = day_block(itinerary_text(option), 2)
+    english = day_block(itinerary_text(option, language=Language.ENGLISH), 2, "Day")
+
+    assert "Visita" in spanish and "Paseo por el cañón" in spanish
+    assert "Canyon walk" not in spanish
+    assert "Tour" in english and "Canyon walk" in english
+    assert "Paseo por el cañón" not in english
+
+
+def test_a_description_is_escaped_and_follows_its_service_name():
+    option = described_option(description_es="50% más & _mucho_ #1")
+
+    block = day_block(itinerary_text(option), 2)
+
+    assert "50\\% más \\& \\_mucho\\_ \\#1" in block
+    assert block.index("Visita") < block.index("50\\%")
+
+
+def test_no_fallback_to_the_other_language():
+    option = described_option(description_en="Canyon walk")
+
+    block = day_block(itinerary_text(option), 2)
+
+    assert "Canyon walk" not in block
+    assert "\\noindent Visita\\par" in block
+    assert "\\small" not in block
+
+
+def test_services_without_descriptions_render_as_before():
+    text = itinerary_text(placed_option())
+
+    assert "\\noindent Visita\\par" in day_block(text, 2)

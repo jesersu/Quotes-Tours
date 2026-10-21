@@ -127,7 +127,9 @@ problem in one run. Keep that behavior when adding columns or mappings.
    is null, or a value is invalid, and returns all reasons together.
 4. `catalog_sql.render_sql` emits one `begin; ... commit;` of upserts: idempotent, no deletes, no
    DDL. Every value goes through the `quote_*` helpers in that module; never interpolate draft
-   values into SQL directly.
+   values into SQL directly. The optional `region`, `description_es` and `description_en` columns
+   upsert with `coalesce(excluded.<col>, quotes.pricing_items.<col>)`, so a null in the draft never
+   erases text the owner already stored.
 
 `output_file.write_new_file` refuses to overwrite without `--force`.
 

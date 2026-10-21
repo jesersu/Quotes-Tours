@@ -5,6 +5,10 @@ input. Text is single-quoted with ``'`` doubled (backslashes are literal because
 ``standard_conforming_strings = on``), NUL is rejected, numbers are emitted only from validated
 ``Decimal``/``int`` values, and enum values are checked against the allowed sets. Draft text is
 never written into SQL comments.
+
+On conflict, ``region``, ``description_es`` and ``description_en`` use
+``coalesce(excluded.<col>, quotes.pricing_items.<col>)``: a null in the draft never erases text
+the owner already stored. Every other column is overwritten with the draft value.
 """
 
 from __future__ import annotations
@@ -71,12 +75,19 @@ def _upsert(
     rows: Iterable[Sequence[str]],
     conflict: str,
     keys: Sequence[str],
+    keep_existing: Sequence[str] = (),
 ) -> str:
     rows = list(rows)
     if not rows:
         return ""
     values = ",\n".join(f"  ({', '.join(row)})" for row in rows)
-    updates = ",\n".join(f"  {c} = excluded.{c}" for c in columns if c not in keys)
+    updates = ",\n".join(
+        f"  {c} = coalesce(excluded.{c}, quotes.{table}.{c})"
+        if c in keep_existing
+        else f"  {c} = excluded.{c}"
+        for c in columns
+        if c not in keys
+    )
     return (
         f"insert into quotes.{table}\n  ({', '.join(columns)})\nvalues\n{values}\n"
         f"on conflict ({conflict}) do update set\n{updates};\n"
@@ -114,6 +125,9 @@ def _pricing_values(row: dict[str, Any]) -> list[str]:
         _nullable(row["duration_days"], _duration),
         quote_bool(row["active"]),
         _nullable(row["notes"], quote_text),
+        _nullable(row["region"], quote_text),
+        _nullable(row["description_es"], quote_text),
+        _nullable(row["description_en"], quote_text),
     ]
 
 
@@ -134,10 +148,14 @@ def render_sql(draft: ValidatedDraft) -> str:
                 "duration_days",
                 "active",
                 "notes",
+                "region",
+                "description_es",
+                "description_en",
             ),
             (_pricing_values(r) for r in draft.item_rows),
             "id",
             ("id",),
+            keep_existing=("region", "description_es", "description_en"),
         ),
         _upsert(
             "local_payment_items",

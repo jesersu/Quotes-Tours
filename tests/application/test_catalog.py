@@ -47,6 +47,23 @@ def local_entry(item_id: str = "sample-ticket") -> LocalPaymentEntry:
     )
 
 
+def test_entry_descriptions_and_region_default_to_none():
+    e = entry()
+    assert (e.region, e.description_es, e.description_en) == (None, None, None)
+
+
+def test_entry_picks_the_description_by_language_without_fallback():
+    e = entry(region="Puno", description_es="Texto es", description_en=None)
+    assert e.description(english=False) == "Texto es"
+    assert e.description(english=True) is None
+
+
+@pytest.mark.parametrize("field", ["region", "description_es", "description_en"])
+def test_entry_rejects_blank_region_and_descriptions(field):
+    with pytest.raises(InvalidPricingInput):
+        entry(**{field: "  "})
+
+
 def test_entry_exposes_id_and_domain_item():
     e = entry()
     assert e.id == "sample-tour"
@@ -157,7 +174,8 @@ def test_audit_warns_about_an_empty_catalog():
 
 
 def test_audit_names_the_missing_visitor_categories():
-    (issue,) = audit_catalog(Catalog(entries=[entry()], local_payments=[local_entry()]))
+    described = entry(description_es="es", description_en="en")
+    (issue,) = audit_catalog(Catalog(entries=[described], local_payments=[local_entry()]))
     assert issue.code == "missing_visitor_category"
     assert "latin_american_adult" in issue.message
     assert "child_6_15" in issue.message
@@ -167,4 +185,18 @@ def test_audit_names_the_missing_visitor_categories():
 def test_audit_is_silent_for_a_complete_catalog():
     prices = tuple(LocalPrice(c, pen("1.00")) for c in VisitorCategory)
     full = LocalPaymentEntry("full-ticket", LocalPaymentInfo("Full", prices), "Completo", "Full")
-    assert audit_catalog(Catalog(entries=[entry()], local_payments=[full])) == ()
+    described = entry(description_es="es", description_en="en")
+    assert audit_catalog(Catalog(entries=[described], local_payments=[full])) == ()
+
+
+def test_audit_warns_once_per_item_missing_a_description():
+    described = entry("full", description_es="es", description_en="en")
+    no_en = entry("no-en", description_es="es")
+    none = entry("none")
+    issues = audit_catalog(Catalog(entries=[described, no_en, none]))
+    assert [(i.severity, i.code, i.subject_id) for i in issues] == [
+        ("warning", "missing_description", "no-en"),
+        ("warning", "missing_description", "none"),
+    ]
+    assert "English" in issues[0].message and "Spanish" not in issues[0].message
+    assert "Spanish" in issues[1].message and "English" in issues[1].message

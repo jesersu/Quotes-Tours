@@ -291,10 +291,25 @@ def _has_itinerary(option: QuotedOption) -> bool:
     return bool(option.itinerary) or any(quoted.on_days for quoted in option.quote.lines)
 
 
-def _itinerary_section(option: QuotedOption, texts: _Texts) -> list[str]:
-    """Every day of the option with the owner's title and the names of the services placed on it.
+def itinerary_day_count(option: QuotedOption) -> int:
+    """How many days the itinerary section shows: all of them, or none without an itinerary."""
+    return option.quote.request.days if _has_itinerary(option) else 0
 
-    Names only: the itinerary never repeats the basis or any price of the services table.
+
+def _placed_service(quoted: QuotedLine, texts: _Texts) -> list[str]:
+    parts = [f"\\noindent {escape_latex(_service_name(quoted, texts))}\\par"]
+    description = quoted.entry.description(texts.lang is Language.ENGLISH)
+    if description:
+        # The description belongs to its service: keep them on one page.
+        parts += ["\\nopagebreak", f"{{\\small\\noindent {escape_latex(description)}\\par}}"]
+    return parts
+
+
+def _itinerary_section(option: QuotedOption, texts: _Texts) -> list[str]:
+    """Every day of the option with the owner's title and the services placed on it.
+
+    Each service shows its name and, when the owner wrote one in the document language, its
+    description. Never the basis or any price of the services table.
     """
     titles = {day.day: day.title for day in option.itinerary}
     parts = [f"\\sect{{{texts.itinerary}}}"]
@@ -303,11 +318,9 @@ def _itinerary_section(option: QuotedOption, texts: _Texts) -> list[str]:
         # The header needs room for its first lines, or it would end a page alone.
         parts.append("\\Needspace*{4\\baselineskip}")
         parts.append(f"\\dayhead{{{texts.day_label} {day}}}{{{title}}}")
-        parts.extend(
-            f"\\noindent {escape_latex(_service_name(quoted, texts))}\\par"
-            for quoted in option.quote.lines
-            if day in quoted.on_days
-        )
+        for quoted in option.quote.lines:
+            if day in quoted.on_days:
+                parts += _placed_service(quoted, texts)
     return parts
 
 

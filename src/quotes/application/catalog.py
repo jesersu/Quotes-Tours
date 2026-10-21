@@ -32,6 +32,12 @@ def _require_text(label: str, owner_id: str, value: str) -> None:
         raise InvalidPricingInput(f"{label} must not be empty: {owner_id}")
 
 
+def _require_text_if_present(label: str, owner_id: str, value: str | None) -> None:
+    # The database forbids blank text in these columns, so a blank here is a bad row.
+    if value is not None:
+        _require_text(label, owner_id, value)
+
+
 @dataclass(frozen=True)
 class CatalogEntry:
     item: CatalogItem
@@ -40,6 +46,9 @@ class CatalogEntry:
     name_en: str
     duration_days: int | None = None
     notes: str | None = None
+    region: str | None = None
+    description_es: str | None = None
+    description_en: str | None = None
 
     def __post_init__(self) -> None:
         _require_text("Category", self.item.id, self.category)
@@ -47,10 +56,17 @@ class CatalogEntry:
         _require_text("English name", self.item.id, self.name_en)
         if self.duration_days is not None and self.duration_days < 1:
             raise InvalidPricingInput(f"Duration must be at least 1 day: {self.item.id}")
+        _require_text_if_present("Region", self.item.id, self.region)
+        _require_text_if_present("Spanish description", self.item.id, self.description_es)
+        _require_text_if_present("English description", self.item.id, self.description_en)
 
     @property
     def id(self) -> str:
         return self.item.id
+
+    def description(self, english: bool) -> str | None:
+        """The owner's description in one language; never falls back to the other one."""
+        return self.description_en if english else self.description_es
 
 
 @dataclass(frozen=True)
@@ -154,6 +170,24 @@ def audit_catalog(catalog: Catalog) -> tuple[CatalogIssue, ...]:
         issues.append(
             CatalogIssue("warning", "empty_catalog", "catalog", "No active pricing items found")
         )
+    for entry in catalog.items():
+        missing_languages = [
+            language
+            for language, text in (
+                ("Spanish", entry.description_es),
+                ("English", entry.description_en),
+            )
+            if text is None
+        ]
+        if missing_languages:
+            issues.append(
+                CatalogIssue(
+                    "warning",
+                    "missing_description",
+                    entry.id,
+                    f"No description in: {', '.join(missing_languages)}",
+                )
+            )
     for local in catalog.local_payments():
         present = {p.category for p in local.info.prices}
         missing = [c.value for c in VisitorCategory if c not in present]

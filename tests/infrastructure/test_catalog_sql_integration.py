@@ -11,7 +11,7 @@ from quotes.infrastructure.catalog_draft import dump_draft, load_draft, validate
 from quotes.infrastructure.catalog_sql import render_sql
 from quotes.infrastructure.postgres_catalog import PostgresCatalogRepository
 from tests.infrastructure.test_postgres_catalog import dsn  # noqa: F401  (guarded fixture)
-from tests.support.draft_fixture import NASTY, valid_draft
+from tests.support.draft_fixture import NASTY, mutate, valid_draft
 
 pytestmark = [
     pytest.mark.integration,
@@ -76,3 +76,26 @@ def test_generated_sql_loads_back_idempotently_and_upserts(dsn):  # noqa: F811
     }
     assert prices["foreign_adult"] == Decimal("60.00")
     assert counts(dsn) == [2, 1, 3]
+
+
+def test_descriptions_load_back_and_a_null_in_the_draft_keeps_the_stored_value(dsn):  # noqa: F811
+    draft = mutate(region="Puno", description_es="Texto es", description_en="Text en")
+    apply(dsn, sql_for(draft))
+    alpha = PostgresCatalogRepository(dsn).load().catalog.get_item("alpha-tour")
+    assert (alpha.region, alpha.description_es, alpha.description_en) == (
+        "Puno",
+        "Texto es",
+        "Text en",
+    )
+
+    apply(dsn, sql_for(valid_draft()))  # descriptions null in the draft: stored ones stay
+    kept = PostgresCatalogRepository(dsn).load().catalog.get_item("alpha-tour")
+    assert (kept.region, kept.description_es, kept.description_en) == (
+        "Puno",
+        "Texto es",
+        "Text en",
+    )
+
+    apply(dsn, sql_for(mutate(description_en="Text v2")))  # a value replaces the stored one
+    changed = PostgresCatalogRepository(dsn).load().catalog.get_item("alpha-tour")
+    assert (changed.region, changed.description_en) == ("Puno", "Text v2")
