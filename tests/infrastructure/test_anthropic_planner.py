@@ -14,6 +14,7 @@ from quotes.application.planner import (
     PlannedItem,
     PlannedOption,
     PlannedRequest,
+    PlannerCatalog,
     PlannerUnavailable,
     QuotePlanner,
     planner_catalog,
@@ -24,6 +25,7 @@ from quotes.infrastructure.llm.anthropic_planner import (
     AnthropicQuotePlanner,
 )
 from quotes.infrastructure.llm.factory import planner_from_env
+from quotes.infrastructure.llm.planning_contract import PLAN_SYSTEM_PROMPT, request_schema
 from tests.application.test_planner import SECRET, make_catalog
 
 VIEW = planner_catalog(make_catalog())
@@ -102,6 +104,60 @@ def test_it_forces_the_tool_and_passes_model_and_limits():
     assert tool["name"] == TOOL_NAME
     assert isinstance(call["system"], str)
     assert "price" in call["system"].lower()
+
+
+def test_an_empty_catalog_is_refused_before_any_call():
+    client = FakeClient(reply(tool_block(good_input())))
+    with pytest.raises(PlannerUnavailable, match="^the catalog has no items to plan with$"):
+        AnthropicQuotePlanner(client, "m").plan(MESSAGE, PlannerCatalog(), TODAY)
+    assert client.messages.calls == []
+
+
+def test_every_top_level_field_is_required_and_nested_requirements_are_unchanged():
+    schema = request_schema(VIEW)
+    assert sorted(schema["required"]) == sorted(schema["properties"])
+    assert set(schema["required"]) == {
+        "client",
+        "title",
+        "language",
+        "days",
+        "adults",
+        "child_ages",
+        "options",
+        "paid_locally",
+        "hints",
+    }
+    option = schema["properties"]["options"]["items"]
+    assert option["required"] == ["items"]
+    assert option["properties"]["items"]["items"]["required"] == ["item_id"]
+    assert option["properties"]["extras"]["items"]["required"] == ["label", "items"]
+    assert option["properties"]["itinerary"]["items"]["required"] == ["day", "title"]
+
+
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "one integer per child",
+        "[9, 12]",
+        "adults counts only adults",
+        "items must hold every service the requested trip needs",
+        "leave out services for places or tours the client did not mention",
+        "a greeting such as hello is not a name",
+        "goes in extras, never also in items",
+        "only for services whose unit is per_unit",
+        "empty string for client",
+    ],
+)
+def test_the_prompt_carries_the_quality_rules(phrase):
+    assert phrase in PLAN_SYSTEM_PROMPT.lower()
+
+
+def test_the_schema_asks_for_at_least_one_option_with_at_least_one_service():
+    # A local model returned no options at all until the schema required one.
+    schema = request_schema(VIEW)
+    options = schema["properties"]["options"]
+    assert options["minItems"] == 1
+    assert options["items"]["properties"]["items"]["minItems"] == 1
 
 
 def test_schema_enums_are_the_catalog_ids():

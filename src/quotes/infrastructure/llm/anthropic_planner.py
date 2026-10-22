@@ -49,6 +49,8 @@ class AnthropicQuotePlanner:
         self._max_tokens = max_tokens
 
     def plan(self, message: str, catalog: PlannerCatalog, today: datetime.date) -> PlannedRequest:
+        if not catalog.items:
+            raise PlannerUnavailable("the catalog has no items to plan with")
         response = self._call(
             PLAN_SYSTEM_PROMPT,
             plan_user_content(message, catalog, today),
