@@ -15,6 +15,8 @@ compile). The LLM planner and RAG are not built yet.
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
+.venv/bin/pip install -e ".[llm]"                             # only for the LLM planner (anthropic)
+
 .venv/bin/pytest                                              # whole suite
 .venv/bin/pytest tests/domain/test_pricing.py                 # one file
 .venv/bin/pytest tests/domain/test_pricing.py::test_name      # one test
@@ -70,6 +72,10 @@ repository; update the vendored copy to match.
 - **Database access is read-only.** `DATABASE_URL` is a read-only connection to the `quotes` schema
   of a shared Supabase Postgres. Writes happen only through the generated SQL script, which the
   owner pastes into the Supabase SQL Editor. Do not add a write path or a write credential.
+- **The LLM provider sees only the client's message and a price-free catalog view** (`PlannerCatalog`:
+  ids, names, unit, duration, region, descriptions). Never send prices, margins, supplier or company
+  data to it. Tests never call the API: they use a fake client, and the `llm` marker (live test)
+  runs only with `ANTHROPIC_API_KEY` set and never in CI.
 
 ## Architecture
 

@@ -48,8 +48,22 @@ and tested (Phase 3), so the model only has to fill the request.
   passed, 20 skipped; ruff clean; a test walks every view field and asserts no money and no
   synthetic price string. Parent: readback (imports only `quotes.application.catalog`), suite spot
   check.
-- [ ] P3 — Anthropic adapter: optional extra `[llm]`, `settings.anthropic_api_key(env)`, tool use with a
-  JSON schema whose ids are an enum of catalog ids, `PlannerUnavailable`, fake client capturing the payload.
+- [x] P3 — `infrastructure/llm/anthropic_planner.py`: `AnthropicQuotePlanner(client, model, max_tokens)`
+  with a duck-typed client; English system prompt (catalog ids only, never prices or margins, doubts
+  in `hints`); user content = today's date, the price-free catalog as JSON lines, the client message;
+  forced tool `propose_quote_request` whose item and paid-locally ids are `enum`s of catalog ids;
+  malformed output → `PlannerUnavailable("unexpected planner output")`; any `create` error →
+  `PlannerUnavailable("planner request failed (<type>)")`, chained. `planner_from_env` imports
+  `anthropic` lazily (install hint if missing). Settings `anthropic_api_key`, `llm_model` (default
+  `claude-sonnet-5-5`). Optional extra `llm = ["anthropic==1.12.0"]`: the newest release at least two
+  weeks old on 2026-10-21 (1.17.0–2.1.0 were days old). Route: delegated writer; branch
+  `feat/planner-03-anthropic` stacked on P2; commit `feat(infrastructure): add the Anthropic quote
+  planner`. Evidence: RED (`ModuleNotFoundError: quotes.infrastructure.llm`; settings `ImportError`)
+  then GREEN 803 passed, 21 skipped without `anthropic` installed; ruff clean; a test asserts no
+  synthetic price string in the whole payload. Parent: readback; made the live `llm` test opt-in
+  (`QUOTES_LIVE_LLM=1` plus the key) so a loaded `.env` never makes an ordinary run call the paid API.
+  Pending for the owner: add `ANTHROPIC_API_KEY` (and optionally `QUOTES_LLM_MODEL`) to `.env` and
+  `.env.example`, which the agent does not read.
 - [ ] P4 — `quotes quote plan <message.txt> [-o] [--force]`: writes the draft under
   `data/private/quotes/`, prints path and counts only; CLI dispatch on `quote_command`; `main(planner=)`.
 - [ ] P5 — Day text: `DayFacts` + `DayWriter` port; a second forced tool `write_day_texts` joins each
@@ -59,6 +73,9 @@ and tested (Phase 3), so the model only has to fill the request.
 ## Acceptance criteria
 - A real client message produces a draft that, after owner review, builds a PDF with `quote build`.
 - No price, margin or company datum appears in the provider payload or in console output.
+
+## Review log
+- P1 + P2 (range af07b29..fab57d7, 893 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-a36306bd5bdf03cd); no advisories.
 
 ## Delivery
 Strategy `ask-on-risk`; forecast about 1.6k authored lines (P1 300, P2 300, P3 350, P4 250, P5 400); one
@@ -70,4 +87,4 @@ stacked PR per task.
 - P1 started 2026-10-21 on branch `feat/planner-01-request-draft` from `main` (af07b29). Route: delegated writer (reader, CLI and their tests).
 
 ## Next step
-P3: the Anthropic adapter (optional `[llm]` extra, fake client in tests).
+P4: `quotes quote plan <message.txt>`.
