@@ -152,10 +152,14 @@ and tested (Phase 3), so the model only has to fill the request.
 - P3 (range fab57d7..ef40fa3, 648 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-968287d6103ef8ad). SUGGESTIONs: `R3-missing-key-order` (`planner_from_env` checks the extra before the key) and `R3-parse-range` (the adapter does not range-check numbers; `parse_quote_request` does later). Follow-ups.
 - P4 + P5 (range ef40fa3..0630ff0, 945 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-6a52c98d3070dde0). SUGGESTION `R3-unknown-label-untested` (`with_day_texts` unknown-label branch has no test): added in P6.
 - P6 (range 0630ff0..8e03b78, 1145 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-b2457bace522f0b3). SUGGESTIONs: `R3-factory-import-order`, `R3-ollama-empty-schema-enum` (an empty catalog gives an empty enum), `R3-ollama-timeout-hint` (a timeout gets no specific hint); the last two are taken into P7.
+- P7 (range 8e03b78..d46bf6f, 366 lines): assess medium; reviewed at the owner's request before merging (2026-10-22); consent granted; one lens (reliability); approved and acknowledged (lineage review-5af47dd0b40cb71c). SUGGESTION `R3-001`: `NUM_PREDICT` 2048 covers both calls; a reply cut at the cap would show only "unexpected planner output", untested. Follow-up: name the cap in that error (Ollama reports `done_reason: "length"`).
 
 ## Delivery
 Strategy `ask-on-risk`; forecast about 1.6k authored lines (P1 300, P2 300, P3 350, P4 250, P5 400); one
 stacked PR per task.
+Pushed 2026-10-22 (owner OK), stacked to main, one commit per PR: #18 P1 90ef631, #19 P2 fab57d7,
+#20 P3 ef40fa3, #21 P4 5440665, #22 P5 0630ff0, #23 P6 8e03b78, #24 P7 d46bf6f. CI green on all
+seven. Retarget each to `main` before merging it (`deleteBranchOnMerge` is off).
 
 ## Progress
 - T7–T9 merged into `main` (PRs #15–#17, af07b29); colcaStarTours migration merged (#98) and applied.
@@ -163,7 +167,5 @@ stacked PR per task.
 - P1 started 2026-10-21 on branch `feat/planner-01-request-draft` from `main` (af07b29). Route: delegated writer (reader, CLI and their tests).
 
 ## Next step
-Push P1–P7 as stacked PRs (owner's call); the owner writes regions and descriptions; then a
-real client message to choose the default model. Old note — local trial: `ollama serve`, pull the model (owner OK for the download), run `quote plan` on the
-invented example message, then on a real one; confirm or change `DEFAULT_OLLAMA_MODEL`. For Anthropic only — first live run: needs the owner's `ANTHROPIC_API_KEY` in `.env`, `pip install -e ".[llm]"`, and the
-owner's authorization to send a real client message to Anthropic. Then push P1–P5 as stacked PRs.
+Owner reviews and merges #18–#24 in order (all seven natively reviewed).
+Then the owner writes regions and descriptions, and a real client message chooses the default model.
