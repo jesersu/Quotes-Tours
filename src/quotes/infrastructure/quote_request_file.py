@@ -29,7 +29,15 @@ from quotes.domain.money import to_decimal
 from quotes.domain.pricing import PricingPolicy
 from quotes.domain.travelers import Travelers
 
-__all__ = ["InvalidRequestFile", "QuoteRequestFile", "read_quote_request"]
+__all__ = [
+    "HEADER",
+    "InvalidRequestFile",
+    "QuoteRequestFile",
+    "RequestNeedsReview",
+    "dump_quote_request",
+    "parse_quote_request",
+    "read_quote_request",
+]
 
 _TOP_KEYS = (
     "client",
@@ -45,6 +53,8 @@ _TOP_KEYS = (
     "options",
     "itinerary",
     "paid_locally",
+    "needs_review",  # written by the planner; the owner sets it to false after reviewing
+    "review_hints",
 )
 _TRAVELER_KEYS = ("adults", "child_ages")
 _PRICING_KEYS = ("margin_rate", "fx_rate", "usd_rounding_step")
@@ -60,6 +70,14 @@ class InvalidRequestFile(Exception):
     def __init__(self, problems: tuple[str, ...]) -> None:
         self.problems = tuple(problems)
         super().__init__("Invalid request file:\n" + "\n".join(f"  - {p}" for p in self.problems))
+
+
+class RequestNeedsReview(Exception):
+    """The request is a planner draft the owner has not reviewed yet (``needs_review: true``)."""
+
+    def __init__(self, hints: tuple[str, ...]) -> None:
+        self.hints = tuple(hints)
+        super().__init__("This request is a draft that still needs review")
 
 
 @dataclass(frozen=True)
@@ -194,8 +212,11 @@ def _policy(data: Any, problems: list[str]) -> PricingPolicy | None:
         return None
     start = len(problems)
     kwargs: dict[str, Any] = {}
-    margin = _required(mapping, "margin_rate", "pricing.", problems)
-    if margin is not None:
+    margin = mapping.get("margin_rate")
+    if margin is None:
+        # The margin is always set by the owner, never by the planner.
+        problems.append("pricing.margin_rate: set the margin for this quote")
+    else:
         kwargs["margin_rate"] = _decimal_text(margin, "pricing.margin_rate", problems)
     for key in ("fx_rate", "usd_rounding_step"):
         if mapping.get(key) is not None:
@@ -425,13 +446,39 @@ def _issue_date(value: Any, problems: list[str]) -> datetime.date | None:
     return value
 
 
+def _review_gate(top: Mapping[str, Any], problems: list[str]) -> tuple[bool, tuple[str, ...]]:
+    """The review flag and the hints. A flag that is not a YAML bool is a problem."""
+    flag = top.get("needs_review")
+    if flag is not None and not isinstance(flag, bool):
+        problems.append("needs_review must be true or false")
+    hints: list[str] = []
+    if top.get("review_hints") is not None:
+        listed = _list(top["review_hints"], "review_hints", problems)
+        for index, hint in enumerate(listed or []):
+            if (text := _text(hint, f"review_hints[{index}]", problems)) is not None:
+                hints.append(text)
+    return flag is True, tuple(hints)
+
+
 def read_quote_request(path: Path) -> QuoteRequestFile:
     """Read and validate a request file, raising ``InvalidRequestFile`` with all problems."""
-    data = _load(Path(path))
+    return parse_quote_request(_load(Path(path)))
+
+
+def parse_quote_request(data: object) -> QuoteRequestFile:
+    """Validate request data already loaded from YAML (money as text, never floats).
+
+    A draft with ``needs_review: true`` raises ``RequestNeedsReview`` and nothing else: like the
+    catalog draft, the gate is reported alone and the other fields are checked after the owner
+    clears it. Problems with the gate keys themselves are still reported as ``InvalidRequestFile``.
+    """
     problems: list[str] = []
     top = _mapping(data, "request file", _TOP_KEYS, problems)
     if top is None:
         raise InvalidRequestFile(tuple(problems))
+    needs_review, hints = _review_gate(top, problems)
+    if needs_review and not any(p.startswith(("needs_review", "review_hints")) for p in problems):
+        raise RequestNeedsReview(hints)
 
     client = _text(_required(top, "client", "", problems), "client", problems)
     title = _text(_required(top, "title", "", problems), "title", problems)
@@ -491,3 +538,46 @@ def read_quote_request(path: Path) -> QuoteRequestFile:
     if problems or not options or policy is None:
         raise InvalidRequestFile(tuple(problems))
     return QuoteRequestFile(options, policy, client, title, signed_by, language, issued_on)
+
+
+HEADER = """\
+# Draft quote request written by the planner. PRIVATE: do not commit it.
+#
+# How to review (then run `quotes quote build <this file>`):
+#   - Check the services (items, extras and options), the days and the itinerary.
+#   - Check the travelers: adults and children's ages.
+#   - Set pricing.margin_rate by hand. The planner never chooses the margin.
+#   - Follow every entry in review_hints, then delete them if you like.
+#   - When you are done, set needs_review: false. `quote build` refuses the file until then.
+#   - Keep money (margin_rate, fx_rate, usd_rounding_step) as quoted strings, for example "0.25".
+"""
+
+_MONEY_KEYS = ("margin_rate", "fx_rate", "usd_rounding_step")
+
+
+def _refuse_floats(value: object, path: str) -> None:
+    if isinstance(value, float):
+        raise ValueError(f"{path} is a float; money and numbers must be text or whole numbers")
+    if isinstance(value, Mapping):
+        for key, inner in value.items():
+            _refuse_floats(inner, f"{path}.{key}" if path else str(key))
+    elif isinstance(value, list | tuple):
+        for index, inner in enumerate(value):
+            _refuse_floats(inner, f"{path}[{index}]")
+
+
+def dump_quote_request(data: Mapping[str, object]) -> str:
+    """The draft as reviewable YAML. A float anywhere raises ``ValueError``."""
+    _refuse_floats(data, "")
+    body = dict(data)
+    pricing = body.get("pricing")
+    if isinstance(pricing, Mapping):
+        # Quoted text keeps the exact amount, and a YAML number is never read back as a float.
+        body["pricing"] = {
+            key: str(value) if key in _MONEY_KEYS and value is not None else value
+            for key, value in pricing.items()
+        }
+    text = yaml.safe_dump(
+        body, sort_keys=False, allow_unicode=True, default_flow_style=False, width=100
+    )
+    return f"{HEADER}\n{text}"
