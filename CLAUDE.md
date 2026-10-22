@@ -8,7 +8,8 @@ Bilingual (EN/ES) tour quote generator for Colca Star Tours. Target output is La
 with prices. Today the repository holds the pricing domain, the catalog read model with its Postgres
 adapter, a CLI to audit the catalog and to load prices from the owner's spreadsheet, and
 `quotes quote build`, which turns a YAML request into a branded PDF (LaTeX renderer, `tectonic`
-compile). The LLM planner and RAG are not built yet.
+compile), and `quotes quote plan`, which drafts that YAML request from a client's message with an LLM
+planner (Anthropic; it never sees prices). RAG is not built yet.
 
 ## Commands
 
@@ -28,8 +29,12 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/quotes catalog check                                # needs DATABASE_URL
 .venv/bin/quotes catalog draft <prices.xlsx>                  # -> data/private/catalog-draft.yaml
 .venv/bin/quotes catalog sql data/private/catalog-draft.yaml  # -> data/private/catalog-import.sql
+.venv/bin/quotes quote plan <message.txt>                     # -> data/private/quotes/<message>.yaml (draft)
 .venv/bin/quotes quote build data/private/quotes/<request>.yaml   # -> data/private/quotes/<request>.pdf
 ```
+
+`quote plan` needs the `.[llm]` extra, `ANTHROPIC_API_KEY` and `DATABASE_URL`; it writes a draft with
+`needs_review: true` and no margin or `signed_by`, and prints counts only.
 
 `quote build` needs `tectonic` (`brew install tectonic`) and `DATABASE_URL`; see
 `examples/quote-request.example.yaml` for the request format. `quote build` refuses a request with
