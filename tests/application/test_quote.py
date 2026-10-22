@@ -580,3 +580,11 @@ def test_itinerary_days_must_be_unique():
 def test_itinerary_must_contain_itinerary_days():
     with pytest.raises(InvalidPricingInput, match="itinerary"):
         QuoteOption("A", None, request(days=2), ("nope",))
+
+
+def test_itinerary_day_text_is_optional_stripped_and_must_be_text():
+    assert ItineraryDay(1, "Title").text is None
+    assert ItineraryDay(1, "Title", "  A fluent paragraph. ").text == "A fluent paragraph."
+    for text in ("", "   ", 5):
+        with pytest.raises(InvalidPricingInput, match="text"):
+            ItineraryDay(1, "Title", text)

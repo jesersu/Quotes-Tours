@@ -13,6 +13,7 @@ required), and a review hint names each of them.
 
 from __future__ import annotations
 
+import copy
 import datetime
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
@@ -20,6 +21,9 @@ from typing import Any, Protocol, runtime_checkable
 from quotes.application.catalog import Catalog
 
 __all__ = [
+    "DayFacts",
+    "DayService",
+    "DayWriter",
     "PlannedDay",
     "PlannedExtra",
     "PlannedItem",
@@ -31,7 +35,9 @@ __all__ = [
     "PlannerUnavailable",
     "QuotePlanner",
     "planner_catalog",
+    "day_facts",
     "to_request_data",
+    "with_day_texts",
 ]
 
 
@@ -153,6 +159,31 @@ class QuotePlanner(Protocol):
     ) -> PlannedRequest: ...
 
 
+@dataclass(frozen=True)
+class DayService:
+    """A service placed on a day, with the owner's description in the request language."""
+
+    name: str
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class DayFacts:
+    """Everything a writer may use for one day: the day title and the placed services."""
+
+    option_label: str | None
+    day: int
+    title: str | None
+    services: tuple[DayService, ...]
+
+
+@runtime_checkable
+class DayWriter(Protocol):
+    """Joins the facts of each day into one paragraph. One text per ``DayFacts``, same order."""
+
+    def write_days(self, days: tuple[DayFacts, ...], language: str) -> tuple[str, ...]: ...
+
+
 def _item_data(item: PlannedItem) -> dict[str, Any]:
     data: dict[str, Any] = {"id": item.item_id}
     if item.on_days:
@@ -250,3 +281,71 @@ def to_request_data(planned: PlannedRequest, catalog: PlannerCatalog) -> dict[st
     if paid:
         data["paid_locally"] = paid
     return data
+
+
+def day_facts(planned: PlannedRequest, catalog: PlannerCatalog) -> tuple[DayFacts, ...]:
+    """The facts per option and day: the title and the catalog's own names and descriptions.
+
+    Only days of the request that have a title or a placed service appear. Unknown ids are
+    skipped, as ``to_request_data`` drops them. No price is involved.
+    """
+    spanish = planned.language == "es"
+    by_id = {item.id: item for item in catalog.items}
+    facts: list[DayFacts] = []
+    for option in planned.options:
+        titles = {day.day: day.title for day in option.itinerary}
+        for number in range(1, (option.days or planned.days) + 1):
+            services = []
+            for placed in option.items:
+                item = by_id.get(placed.item_id)
+                if item is None or number not in placed.on_days:
+                    continue
+                name, description = (
+                    (item.name_es, item.description_es)
+                    if spanish
+                    else (item.name_en, item.description_en)
+                )
+                services.append(DayService(name, description))
+            title = titles.get(number)
+            if title is not None or services:
+                facts.append(DayFacts(option.label, number, title, tuple(services)))
+    return tuple(facts)
+
+
+def _target_option(data: dict[str, Any], label: str | None) -> dict[str, Any]:
+    options = data.get("options")
+    if not options:
+        return data
+    for option in options:
+        if option.get("label") == label:
+            return option
+    raise PlannerUnavailable("unexpected planner output")
+
+
+def with_day_texts(
+    data: dict[str, Any], days: tuple[DayFacts, ...], texts: tuple[str, ...]
+) -> dict[str, Any]:
+    """A copy of the request data with each text in its option's itinerary entry.
+
+    A blank text is skipped and named in a review hint. A day that gets text without a title is
+    written without one: the reader asks for it at review, and a hint says so.
+    """
+    if len(texts) != len(days):
+        raise PlannerUnavailable("unexpected planner output")
+    result = copy.deepcopy(data)
+    hints: list[str] = result.setdefault("review_hints", [])
+    for facts, text in zip(days, texts, strict=True):
+        if not text.strip():
+            hints.append(f"No text for day {facts.day}")
+            continue
+        target = _target_option(result, facts.option_label)
+        itinerary: list[dict[str, Any]] = target.setdefault("itinerary", [])
+        entry = next((e for e in itinerary if e["day"] == facts.day), None)
+        if entry is None:
+            entry = {"day": facts.day}
+            itinerary.append(entry)
+            itinerary.sort(key=lambda e: e["day"])
+        if "title" not in entry:
+            hints.append(f"Set a title for day {facts.day}")
+        entry["text"] = text.strip()
+    return result

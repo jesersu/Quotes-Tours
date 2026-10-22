@@ -20,6 +20,7 @@ from dataclasses import asdict
 from typing import Any
 
 from quotes.application.planner import (
+    DayFacts,
     PlannedDay,
     PlannedExtra,
     PlannedItem,
@@ -30,9 +31,10 @@ from quotes.application.planner import (
 )
 from quotes.infrastructure.settings import anthropic_api_key, llm_model
 
-__all__ = ["TOOL_NAME", "AnthropicQuotePlanner", "planner_from_env"]
+__all__ = ["DAY_TOOL_NAME", "TOOL_NAME", "AnthropicQuotePlanner", "planner_from_env"]
 
 TOOL_NAME = "propose_quote_request"
+DAY_TOOL_NAME = "write_day_texts"
 
 SYSTEM_PROMPT = """\
 You turn a travel agency client's message into a draft tour quote request by calling the \
@@ -50,6 +52,17 @@ each day a short title when the message makes it obvious.
 add a hint.
 - Put every doubt, missing fact or assumption in hints, one short sentence each.
 - Use paid_locally only for the local payments listed in the catalog.
+"""
+
+DAY_SYSTEM_PROMPT = """\
+You write the day-by-day text of a travel agency's tour quote by calling the write_day_texts \
+tool. A person reviews every text before it is used.
+
+Rules:
+- Write one short paragraph per day, in the language given, in the same order as the days.
+- Use only the facts given for each day: its title, the service names and their descriptions. \
+Join them into fluent prose.
+- Never add places, times, prices, costs or promises that are not in the facts. No lists.
 """
 
 
@@ -212,15 +225,28 @@ def _parse(raw: Any) -> PlannedRequest:
     )
 
 
-def _tool_input(response: Any) -> Any:
+def _tool_input(response: Any, name: str = TOOL_NAME) -> Any:
     for block in getattr(response, "content", None) or []:
-        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == TOOL_NAME:
+        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == name:
             return block.input
     raise _BadOutput
 
 
+def _day_content(days: tuple[DayFacts, ...], language: str) -> str:
+    lines = [f"Language: {language}", "", "Days (one JSON object per line):"]
+    lines += [json.dumps(asdict(facts), ensure_ascii=False) for facts in days]
+    return "\n".join(lines)
+
+
+def _parse_texts(raw: Any, expected: int) -> tuple[str, ...]:
+    texts = tuple(_text(t) for t in _list(_dict(raw).get("texts")))
+    if len(texts) != expected:
+        raise _BadOutput
+    return texts
+
+
 class AnthropicQuotePlanner:
-    """``QuotePlanner`` backed by the Anthropic Messages API (forced tool use)."""
+    """``QuotePlanner`` and ``DayWriter`` backed by the Anthropic Messages API (forced tool use)."""
 
     def __init__(self, client: Any, model: str, max_tokens: int = 4096) -> None:
         self._client = client
@@ -247,6 +273,35 @@ class AnthropicQuotePlanner:
             raise PlannerUnavailable(f"planner request failed ({type(exc).__name__})") from exc
         try:
             return _parse(_tool_input(response))
+        except _BadOutput:
+            raise PlannerUnavailable("unexpected planner output") from None
+
+    def write_days(self, days: tuple[DayFacts, ...], language: str) -> tuple[str, ...]:
+        if not days:
+            return ()
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=self._max_tokens,
+                system=DAY_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": _day_content(days, language)}],
+                tools=[
+                    {
+                        "name": DAY_TOOL_NAME,
+                        "description": "Write one paragraph for each day from the facts given.",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {"texts": {"type": "array", "items": {"type": "string"}}},
+                            "required": ["texts"],
+                        },
+                    }
+                ],
+                tool_choice={"type": "tool", "name": DAY_TOOL_NAME},
+            )
+        except Exception as exc:
+            raise PlannerUnavailable(f"planner request failed ({type(exc).__name__})") from exc
+        try:
+            return _parse_texts(_tool_input(response, DAY_TOOL_NAME), len(days))
         except _BadOutput:
             raise PlannerUnavailable("unexpected planner output") from None
 

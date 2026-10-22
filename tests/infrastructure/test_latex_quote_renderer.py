@@ -1304,3 +1304,17 @@ def test_services_without_descriptions_render_as_before():
     text = itinerary_text(placed_option())
 
     assert "\\noindent Visita\\par" in day_block(text, 2)
+
+
+def test_a_day_text_is_an_escaped_paragraph_before_the_services():
+    option = placed_option(itinerary=(ItineraryDay(1, "Arequipa", "Un día de 100% calma & paz."),))
+    block = day_block(itinerary_text(option), 1)
+    assert "Un día de 100\\% calma \\& paz." in block
+    assert block.index("calma") < block.index("Cama")
+    assert block.index("calma") > block.index("\\dayhead{Día 1}")
+
+
+def test_the_english_day_text_comes_before_the_services_too():
+    option = placed_option(itinerary=(ItineraryDay(1, "Arrival", "A quiet day."),))
+    block = day_block(itinerary_text(option, language=EN), 1, "Day")
+    assert block.index("A quiet day.") < block.index("Service bed")

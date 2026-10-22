@@ -759,3 +759,36 @@ def test_a_dumped_draft_marked_for_review_is_refused():
     with pytest.raises(RequestNeedsReview) as caught:
         parse_quote_request(loaded)
     assert caught.value.hints == ("Check the hotel",)
+
+
+DAY_TEXT = PLACED.replace(
+    "    title: Arequipa - Chivay\n", "    title: Arequipa - Chivay\n    text: A calm first day.\n"
+)
+
+
+def test_an_itinerary_entry_may_carry_a_text(tmp_path):
+    (only,) = read_quote_request(write(tmp_path, DAY_TEXT)).options
+    assert only.itinerary[0] == ItineraryDay(1, "Arequipa - Chivay", "A calm first day.")
+    assert only.itinerary[1].text is None
+
+
+@pytest.mark.parametrize("value", ['""', '"   "', "5"])
+def test_a_blank_or_non_text_day_text_is_refused_with_its_path(tmp_path, value):
+    content = DAY_TEXT.replace("A calm first day.", value)
+    with pytest.raises(InvalidRequestFile) as caught:
+        read_quote_request(write(tmp_path, content))
+    assert "itinerary[0].text must be non-empty text" in caught.value.problems
+
+
+def test_an_unknown_itinerary_key_is_still_refused(tmp_path):
+    content = DAY_TEXT.replace("text: A calm", "notes: A calm")
+    with pytest.raises(InvalidRequestFile) as caught:
+        read_quote_request(write(tmp_path, content))
+    assert any("notes" in problem for problem in caught.value.problems)
+
+
+def test_day_text_round_trips_through_dump(tmp_path):
+    loaded = yaml.load(DAY_TEXT, _NoFloatLoader)
+    again = yaml.load(dump_quote_request(loaded), _NoFloatLoader)
+    assert parse_quote_request(again) == parse_quote_request(loaded)
+    assert again["itinerary"][0]["text"] == "A calm first day."

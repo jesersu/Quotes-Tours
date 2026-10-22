@@ -14,10 +14,13 @@ import psycopg
 from quotes.application.catalog import CatalogLoad, CatalogRepository
 from quotes.application.catalog_proposal import propose_catalog
 from quotes.application.planner import (
+    DayWriter,
     PlannerUnavailable,
     QuotePlanner,
+    day_facts,
     planner_catalog,
     to_request_data,
+    with_day_texts,
 )
 from quotes.application.quote import build_quote_options
 from quotes.application.quote_rendering import QuoteDocument
@@ -324,6 +327,17 @@ def _quote_plan(
         print(f"error: {exc}", file=err)
         return EXIT_UNAVAILABLE
     data = to_request_data(planned, view)
+    day_texts = 0
+    if isinstance(chosen, DayWriter):
+        facts = day_facts(planned, view)
+        if facts:
+            try:
+                texts = chosen.write_days(facts, planned.language)
+                data = with_day_texts(data, facts, texts)
+            except PlannerUnavailable as exc:
+                print(f"error: {exc}", file=err)
+                return EXIT_UNAVAILABLE
+            day_texts = sum(1 for text in texts if text.strip())
     try:
         write_new_file(output, dump_quote_request(data), force=args.force)
     except OutputExists as exc:
@@ -344,6 +358,8 @@ def _quote_plan(
     print(f"  options: {len(options)}", file=out)
     print(f"  services: {sum(len(option.get('items', ())) for option in options)}", file=out)
     print(f"  hints: {len(data['review_hints'])}", file=out)
+    if day_texts:
+        print(f"  day texts: {day_texts}", file=out)
     print(
         "Review it, set signed_by and pricing.margin_rate, set needs_review: false, "
         f"then run: quotes quote build {output}",

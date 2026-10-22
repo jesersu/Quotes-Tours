@@ -59,7 +59,7 @@ _TOP_KEYS = (
 _TRAVELER_KEYS = ("adults", "child_ages")
 _PRICING_KEYS = ("margin_rate", "fx_rate", "usd_rounding_step")
 _ITEM_KEYS = ("id", "days", "quantity", "on_days")
-_ITINERARY_KEYS = ("day", "title")
+_ITINERARY_KEYS = ("day", "title", "text")
 _EXTRA_KEYS = ("label", "items")
 _OPTION_KEYS = ("label", "subtitle", "days", "items", "extras", "itinerary")
 
@@ -271,13 +271,18 @@ def _itinerary(
         day = _day_number(raw_day, f"{label}.day", days, problems) if raw_day is not None else None
         raw_title = _required(mapping, "title", f"{label}.", problems)
         title = _text(raw_title, f"{label}.title", problems) if raw_title is not None else None
+        text = None
+        if "text" in mapping:
+            text = _text(mapping.get("text"), f"{label}.text", problems)
+            if text is None:
+                continue
         if day is not None and day in seen:
             problems.append(f"{label}.day repeats {path}[{seen[day]}].day")
             continue
         if day is not None:
             seen[day] = index
         if day is not None and title is not None:
-            entries.append(ItineraryDay(day, title))
+            entries.append(ItineraryDay(day, title, text))
     return tuple(entries)
 
 

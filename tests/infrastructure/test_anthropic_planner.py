@@ -7,6 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from quotes.application.planner import (
+    DayFacts,
+    DayService,
+    DayWriter,
     PlannedDay,
     PlannedExtra,
     PlannedItem,
@@ -17,6 +20,7 @@ from quotes.application.planner import (
     planner_catalog,
 )
 from quotes.infrastructure.llm.anthropic_planner import (
+    DAY_TOOL_NAME,
     TOOL_NAME,
     AnthropicQuotePlanner,
     planner_from_env,
@@ -307,3 +311,79 @@ def test_planner_from_env_requires_the_key(monkeypatch):
 def test_live_planner_answers():  # pragma: no cover - never runs in CI
     planned = planner_from_env().plan(MESSAGE, VIEW, TODAY)
     assert planned.adults >= 1
+
+
+# --- day texts ---
+
+DAYS = (
+    DayFacts(None, 1, "Arrival", (DayService("Van", "Private transfer"),)),
+    DayFacts(None, 2, None, (DayService("Tour", None),)),
+)
+
+
+def days_block(texts, name=DAY_TOOL_NAME):
+    return tool_block({"texts": texts}, name=name)
+
+
+def write(client, days=DAYS, language="en"):
+    return AnthropicQuotePlanner(client, "model-x").write_days(days, language)
+
+
+def test_it_is_a_day_writer():
+    assert isinstance(AnthropicQuotePlanner(FakeClient(), "m"), DayWriter)
+
+
+def test_write_days_forces_its_own_tool_and_sends_only_facts():
+    client = FakeClient(reply(days_block(["One", "Two"])))
+    assert write(client) == ("One", "Two")
+    (call,) = client.messages.calls
+    assert call["tool_choice"] == {"type": "tool", "name": DAY_TOOL_NAME}
+    (tool,) = call["tools"]
+    assert tool["name"] == "write_day_texts"
+    assert tool["input_schema"]["properties"]["texts"] == {
+        "type": "array",
+        "items": {"type": "string"},
+    }
+    assert "never add" in call["system"].lower()
+    (message,) = call["messages"]
+    content = message["content"]
+    assert "Arrival" in content
+    assert "Private transfer" in content
+    assert "en" in content
+    payload = json.dumps(call, default=str)
+    assert SECRET not in payload
+
+
+def test_write_days_without_days_makes_no_call():
+    client = FakeClient(reply(days_block([])))
+    assert write(client, days=()) == ()
+    assert client.messages.calls == []
+
+
+def test_write_days_count_mismatch_is_unavailable():
+    with pytest.raises(PlannerUnavailable, match="^unexpected planner output$"):
+        write(FakeClient(reply(days_block(["only one"]))))
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        reply(),
+        reply(days_block(["a", "b"], name="other")),
+        reply(tool_block({"texts": "nope"}, name="write_day_texts")),
+        reply(tool_block({"texts": ["a", 2]}, name="write_day_texts")),
+        SimpleNamespace(),
+    ],
+)
+def test_write_days_bad_output_is_unavailable(response):
+    with pytest.raises(PlannerUnavailable, match="^unexpected planner output$"):
+        write(FakeClient(response))
+
+
+def test_write_days_provider_errors_keep_only_the_type_name():
+    class ProviderBoom(Exception):
+        pass
+
+    with pytest.raises(PlannerUnavailable) as caught:
+        write(FakeClient(error=ProviderBoom("key sk-secret")))
+    assert str(caught.value) == "planner request failed (ProviderBoom)"
