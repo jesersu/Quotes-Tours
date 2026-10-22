@@ -17,6 +17,10 @@ and tested (Phase 3), so the model only has to fill the request.
   the owner reviews it and sets the margin.
 - Provider confirmed by the owner 2026-10-21 (Phase 4 plan approved the same day): Anthropic Python SDK as an optional extra; default model `claude-sonnet-5-5`, overridable with
   `QUOTES_LLM_MODEL`; key in `ANTHROPIC_API_KEY`.
+- 2026-10-21, owner: use a local model through Ollama instead of a paid API ("pasemos a Ollama"), so client
+  messages never leave the machine and nothing is billed. The Anthropic adapter stays as an option;
+  `QUOTES_LLM_PROVIDER` picks the provider, default `ollama`. Owner's machine: Apple M3 Pro, 18 GB RAM,
+  Ollama 0.33.3 installed.
 - RAG is deferred: about 30 catalog items fit in the prompt.
 
 ## Constraints
@@ -90,6 +94,23 @@ and tested (Phase 3), so the model only has to fill the request.
   (weak: the other new tests were not run against the old code), then GREEN 860 passed, 21 skipped;
   ruff clean. Parent: readback of the day prompt, suite spot check.
 
+- [x] P6 — Ollama provider. `llm/planning_contract.py` holds the prompts (now "answer only with the
+  requested JSON", rules unchanged), the user-content builders, the request schema (ids as `enum`), the
+  day-texts schema and both parsers; `anthropic_planner.py` keeps only its tool transport.
+  `OllamaQuotePlanner(host, model, transport, timeout=300)` posts to `{host}/api/chat` with
+  `format` = the schema, `stream: false`, temperature 0, via `urllib` (no dependency); unreachable
+  server → hint `start it with: ollama serve` (`HTTPError` excluded, the server answered); other
+  errors → `planner request failed (<type>)`. Settings `InvalidSetting`, `llm_provider` (default
+  `ollama`), `ollama_host` (default `http://localhost:11434`), provider-aware `llm_model`
+  (`DEFAULT_OLLAMA_MODEL = "qwen2.5:14b"`, to confirm after a local trial). Neutral
+  `planner_from_env` in `quotes.infrastructure.llm.factory`; the CLI imports it there and exits 2 on
+  `InvalidSetting`. Includes the `R3-unknown-label-untested` test (passed at once: it pins existing
+  behavior). Route: delegated writer; branch `feat/planner-06-ollama` stacked on P5; commit
+  `feat(infrastructure): plan quotes with a local Ollama model`. Evidence: RED (collection
+  `ImportError: cannot import name 'planner_from_env' from 'quotes.infrastructure.llm'`, missing
+  `ollama_planner` and settings names) then GREEN 894 passed, 21 skipped; ruff clean. Parent: readback
+  of the transport, suite spot check. Not done: the local trial with a real model.
+
 ## Acceptance criteria
 - A real client message produces a draft that, after owner review, builds a PDF with `quote build`.
 - No price, margin or company datum appears in the provider payload or in console output.
@@ -97,6 +118,7 @@ and tested (Phase 3), so the model only has to fill the request.
 ## Review log
 - P1 + P2 (range af07b29..fab57d7, 893 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-a36306bd5bdf03cd); no advisories.
 - P3 (range fab57d7..ef40fa3, 648 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-968287d6103ef8ad). SUGGESTIONs: `R3-missing-key-order` (`planner_from_env` checks the extra before the key) and `R3-parse-range` (the adapter does not range-check numbers; `parse_quote_request` does later). Follow-ups.
+- P4 + P5 (range ef40fa3..0630ff0, 945 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-6a52c98d3070dde0). SUGGESTION `R3-unknown-label-untested` (`with_day_texts` unknown-label branch has no test): added in P6.
 
 ## Delivery
 Strategy `ask-on-risk`; forecast about 1.6k authored lines (P1 300, P2 300, P3 350, P4 250, P5 400); one
@@ -108,5 +130,6 @@ stacked PR per task.
 - P1 started 2026-10-21 on branch `feat/planner-01-request-draft` from `main` (af07b29). Route: delegated writer (reader, CLI and their tests).
 
 ## Next step
-First live run: needs the owner's `ANTHROPIC_API_KEY` in `.env`, `pip install -e ".[llm]"`, and the
+Local trial: `ollama serve`, pull the model (owner OK for the download), run `quote plan` on the
+invented example message, then on a real one; confirm or change `DEFAULT_OLLAMA_MODEL`. For Anthropic only — first live run: needs the owner's `ANTHROPIC_API_KEY` in `.env`, `pip install -e ".[llm]"`, and the
 owner's authorization to send a real client message to Anthropic. Then push P1–P5 as stacked PRs.

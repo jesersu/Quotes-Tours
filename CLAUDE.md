@@ -9,14 +9,14 @@ with prices. Today the repository holds the pricing domain, the catalog read mod
 adapter, a CLI to audit the catalog and to load prices from the owner's spreadsheet, and
 `quotes quote build`, which turns a YAML request into a branded PDF (LaTeX renderer, `tectonic`
 compile), and `quotes quote plan`, which drafts that YAML request from a client's message with an LLM
-planner (Anthropic; it never sees prices). RAG is not built yet.
+planner (a local Ollama model by default, Anthropic optional; it never sees prices). RAG is not built yet.
 
 ## Commands
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
-.venv/bin/pip install -e ".[llm]"                             # only for the LLM planner (anthropic)
+.venv/bin/pip install -e ".[llm]"                             # only for the optional Anthropic planner
 
 .venv/bin/pytest                                              # whole suite
 .venv/bin/pytest tests/domain/test_pricing.py                 # one file
@@ -33,8 +33,11 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/quotes quote build data/private/quotes/<request>.yaml   # -> data/private/quotes/<request>.pdf
 ```
 
-`quote plan` needs the `.[llm]` extra, `ANTHROPIC_API_KEY` and `DATABASE_URL`; it writes a draft with
-`needs_review: true` and no margin or `signed_by`, and prints counts only.
+`quote plan` needs `DATABASE_URL` and a local Ollama model by default: `ollama serve`, then
+`ollama pull <model>` (default `qwen2.5:14b`; override with `QUOTES_LLM_MODEL`, and `OLLAMA_HOST` if
+the server is not on `http://localhost:11434`). Anthropic is optional: `QUOTES_LLM_PROVIDER=anthropic`,
+the `.[llm]` extra and `ANTHROPIC_API_KEY`. It writes a draft with `needs_review: true` and no margin
+or `signed_by`, and prints counts only.
 
 `quote build` needs `tectonic` (`brew install tectonic`) and `DATABASE_URL`; see
 `examples/quote-request.example.yaml` for the request format. `quote build` refuses a request with
@@ -77,10 +80,12 @@ repository; update the vendored copy to match.
 - **Database access is read-only.** `DATABASE_URL` is a read-only connection to the `quotes` schema
   of a shared Supabase Postgres. Writes happen only through the generated SQL script, which the
   owner pastes into the Supabase SQL Editor. Do not add a write path or a write credential.
-- **The LLM provider sees only the client's message and a price-free catalog view** (`PlannerCatalog`:
+- **The LLM sees only the client's message and a price-free catalog view** (`PlannerCatalog`:
   ids, names, unit, duration, region, descriptions). Never send prices, margins, supplier or company
-  data to it. Tests never call the API: they use a fake client, and the `llm` marker (live test)
-  runs only with `ANTHROPIC_API_KEY` set and never in CI.
+  data to it. With Ollama (the default) nothing leaves the machine; with Anthropic, what is sent is
+  exactly that view and the message. Tests never call a model: they use a fake client or transport,
+  and the `llm` marker (live Anthropic test) runs only with `QUOTES_LIVE_LLM=1` and
+  `ANTHROPIC_API_KEY` set, never in CI.
 
 Day texts: `quotes quote plan` also asks the planner for one paragraph per day, built only from
 the owner's catalog descriptions and day titles; they are written into the draft's `itinerary`

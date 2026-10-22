@@ -35,7 +35,7 @@ from quotes.infrastructure.latex.pdf import (
     compile_pdf,
 )
 from quotes.infrastructure.latex.quote_renderer import LatexQuoteRenderer, itinerary_day_count
-from quotes.infrastructure.llm.anthropic_planner import planner_from_env
+from quotes.infrastructure.llm import planner_from_env
 from quotes.infrastructure.output_file import OutputExists, write_new_file
 from quotes.infrastructure.postgres_catalog import PostgresCatalogRepository
 from quotes.infrastructure.quote_request_file import (
@@ -44,7 +44,7 @@ from quotes.infrastructure.quote_request_file import (
     dump_quote_request,
     read_quote_request,
 )
-from quotes.infrastructure.settings import MissingSetting, database_url
+from quotes.infrastructure.settings import InvalidSetting, MissingSetting, database_url
 
 EXIT_OK = 0
 EXIT_CATALOG_ERRORS = 1
@@ -323,7 +323,7 @@ def _quote_plan(
     try:
         chosen = planner if planner is not None else planner_from_env(env)
         planned = chosen.plan(message, view, today())
-    except (MissingSetting, PlannerUnavailable) as exc:
+    except (MissingSetting, InvalidSetting, PlannerUnavailable) as exc:
         print(f"error: {exc}", file=err)
         return EXIT_UNAVAILABLE
     data = to_request_data(planned, view)
