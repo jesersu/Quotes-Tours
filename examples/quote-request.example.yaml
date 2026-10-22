@@ -5,6 +5,8 @@ title: Colca Canyon, 2 days
 language: en            # es (default) or en
 date: 2026-10-14        # optional; default is today
 signed_by: Sales team
+# Optional: needs_review (true/false) and review_hints (list of text) mark a draft written by the
+# planner. `quote build` refuses a request with needs_review: true; set it to false once reviewed.
 days: 2
 travelers:
   adults: 2

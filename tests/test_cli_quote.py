@@ -528,3 +528,54 @@ def test_on_days_outside_the_trip_exit_2_with_the_field_path(files):
     assert code == 2
     assert out == ""
     assert "items[0].on_days[0]" in err
+
+
+# --- planner drafts ---
+
+
+def test_a_request_that_needs_review_is_refused_with_its_hints(files):
+    request, _, output = files
+    request.write_text(
+        REQUEST + "needs_review: true\nreview_hints:\n  - Check the horse ride\n  - Confirm ages\n",
+        encoding="utf-8",
+    )
+    compile_ = FakeCompile()
+    code, out, err = build(files, compile=compile_)
+    assert code == 1
+    assert err.startswith("error: this request is a draft that still needs review.")
+    assert "  Check the horse ride\n  Confirm ages\n" in err
+    assert "needs_review: false" in err
+    assert out == ""
+    assert not output.exists()
+    assert compile_.tex is None
+    for secret in (PRICE, MARGIN, FX, TICKET):
+        assert secret not in err
+
+
+def test_a_draft_does_not_touch_the_catalog(files):
+    request, _, _ = files
+    request.write_text(REQUEST + "needs_review: true\n", encoding="utf-8")
+
+    class Untouchable:
+        def __getattr__(self, name):
+            raise AssertionError("the catalog must not be read for a draft")
+
+    code, _, _ = build(files, repository=Untouchable(), compile=FakeCompile())
+    assert code == 1
+
+
+def test_a_reviewed_request_builds(files):
+    request, _, output = files
+    request.write_text(REQUEST + "needs_review: false\n", encoding="utf-8")
+    code, _, _ = build(files, compile=FakeCompile())
+    assert code == 0
+    assert output.exists()
+
+
+def test_a_request_without_a_margin_exits_two_and_asks_for_it(files):
+    request, _, output = files
+    request.write_text(REQUEST.replace(f"  margin_rate: {MARGIN}\n", ""), encoding="utf-8")
+    code, _, err = build(files, compile=FakeCompile())
+    assert code == 2
+    assert "pricing.margin_rate: set the margin for this quote" in err
+    assert not output.exists()

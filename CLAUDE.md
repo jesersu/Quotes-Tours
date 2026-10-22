@@ -30,7 +30,8 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
 
 `quote build` needs `tectonic` (`brew install tectonic`) and `DATABASE_URL`; see
-`examples/quote-request.example.yaml` for the request format.
+`examples/quote-request.example.yaml` for the request format. `quote build` refuses a request with
+`needs_review: true` (a planner draft) until the owner reviews it and sets it to `false`.
 
 Load the environment with `set -a; source .env; set +a` (see `.env.example`).
 

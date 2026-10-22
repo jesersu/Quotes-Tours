@@ -3,6 +3,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+import yaml
 
 from quotes.application.quote import (
     ItineraryDay,
@@ -13,7 +14,15 @@ from quotes.application.quote import (
 )
 from quotes.application.quote_rendering import Language
 from quotes.domain.travelers import Travelers
-from quotes.infrastructure.quote_request_file import InvalidRequestFile, read_quote_request
+from quotes.infrastructure.quote_request_file import (
+    HEADER,
+    InvalidRequestFile,
+    RequestNeedsReview,
+    _NoFloatLoader,
+    dump_quote_request,
+    parse_quote_request,
+    read_quote_request,
+)
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "quote-request.example.yaml"
 
@@ -108,7 +117,7 @@ items:
     assert "client must be non-empty text" in problems
     assert "signed_by is required" in problems
     assert "travelers.adults must be a whole number" in problems
-    assert "pricing.margin_rate is required" in problems
+    assert "pricing.margin_rate: set the margin for this quote" in problems
     assert "items[0].days must be a whole number" in problems
 
 
@@ -122,7 +131,7 @@ def test_nested_required_keys_missing(tmp_path):
     text = "client: A\ntitle: T\nsigned_by: S\ndays: 1\ntravelers: {}\npricing: {}\nitems: []\n"
     problems = problems_of(tmp_path, text)
     assert "travelers.adults is required" in problems
-    assert "pricing.margin_rate is required" in problems
+    assert "pricing.margin_rate: set the margin for this quote" in problems
 
 
 @pytest.mark.parametrize(
@@ -593,3 +602,160 @@ def test_the_example_file_shows_on_days_and_an_itinerary():
 
     assert any(item.on_days for item in only.request.items)
     assert only.itinerary
+
+
+# --- parsing loaded data, and the review gate ---
+
+DRAFT = {
+    "client": "Ana",
+    "title": "Trip",
+    "signed_by": "Team",
+    "days": 3,
+    "travelers": {"adults": 2, "child_ages": [8]},
+    "pricing": {"margin_rate": "0.25", "fx_rate": "3.5", "usd_rounding_step": "5"},
+    "paid_locally": ["ticket"],
+    "options": [
+        {
+            "label": "Option 1",
+            "subtitle": "Ends in Puno",
+            "items": [{"id": "van"}, {"id": "guide", "days": 1, "on_days": [1, 2]}],
+            "extras": [{"label": "Horse", "items": [{"id": "horse"}]}],
+            "itinerary": [{"day": 1, "title": "Arrival"}, {"day": 2, "title": "Canyon"}],
+        },
+        {"label": "Option 2", "days": 2, "items": [{"id": "van", "quantity": 2}]},
+    ],
+    "needs_review": False,
+}
+
+
+def test_parse_from_data_equals_read_from_file(tmp_path):
+    assert parse_quote_request(yaml.load(MINIMAL, _NoFloatLoader)) == read_quote_request(
+        write(tmp_path, MINIMAL)
+    )
+
+
+def test_parse_reports_the_same_problems_as_the_file_reader(tmp_path):
+    with pytest.raises(InvalidRequestFile) as caught:
+        parse_quote_request({"client": "A", "items": "van"})
+    assert "items must be a list" in caught.value.problems
+    assert "title is required" in caught.value.problems
+
+
+def test_parse_rejects_data_that_is_not_a_mapping():
+    with pytest.raises(InvalidRequestFile) as caught:
+        parse_quote_request(["x"])
+    assert caught.value.problems == ("request file must be a mapping",)
+
+
+def test_needs_review_true_raises_with_the_hints():
+    data = {"needs_review": True, "review_hints": ["Check the hotel", "Confirm ages"]}
+    with pytest.raises(RequestNeedsReview) as caught:
+        parse_quote_request(data)
+    assert caught.value.hints == ("Check the hotel", "Confirm ages")
+    assert not isinstance(caught.value, InvalidRequestFile)
+
+
+def test_needs_review_true_is_reported_alone_even_if_the_rest_is_broken():
+    with pytest.raises(RequestNeedsReview) as caught:
+        parse_quote_request({"needs_review": True})
+    assert caught.value.hints == ()
+
+
+def test_needs_review_true_from_a_file_raises(tmp_path):
+    with pytest.raises(RequestNeedsReview):
+        read_quote_request(write(tmp_path, MINIMAL + "needs_review: true\n"))
+
+
+@pytest.mark.parametrize("flag", ["false", ""])
+def test_needs_review_false_or_absent_parses_normally(tmp_path, flag):
+    text = MINIMAL + (f"needs_review: {flag}\n" if flag else "")
+    assert read_quote_request(write(tmp_path, text)).request.days == 2
+
+
+@pytest.mark.parametrize("flag", ['"yes"', "1", "null_text", "[true]"])
+def test_needs_review_must_be_a_bool(tmp_path, flag):
+    assert "needs_review must be true or false" in problems_of(
+        tmp_path, MINIMAL + f"needs_review: {flag}\n"
+    )
+
+
+def test_a_non_bool_flag_is_not_mistaken_for_the_gate(tmp_path):
+    with pytest.raises(InvalidRequestFile):
+        read_quote_request(write(tmp_path, MINIMAL + "needs_review: 'true'\n"))
+
+
+@pytest.mark.parametrize(
+    ("hints", "message"),
+    [
+        ("x", "review_hints must be a list"),
+        ("[a, '']", "review_hints[1] must be non-empty text"),
+        ("[3]", "review_hints[0] must be non-empty text"),
+    ],
+)
+def test_bad_review_hints_are_problems(tmp_path, hints, message):
+    assert message in problems_of(tmp_path, MINIMAL + f"review_hints: {hints}\n")
+
+
+def test_hints_are_ignored_when_the_request_is_reviewed(tmp_path):
+    text = MINIMAL + "needs_review: false\nreview_hints: [Check the dates]\n"
+    assert read_quote_request(write(tmp_path, text)).request.days == 2
+
+
+@pytest.mark.parametrize(
+    "pricing", ["pricing:\n  margin_rate: null\n", "pricing:\n  fx_rate: '3'\n"]
+)
+def test_a_missing_or_null_margin_asks_the_owner_to_set_it(tmp_path, pricing):
+    text = MINIMAL.replace("pricing:\n  margin_rate: 0.25\n", pricing)
+    assert "pricing.margin_rate: set the margin for this quote" in problems_of(tmp_path, text)
+
+
+# --- writing a draft ---
+
+
+def test_dump_starts_with_the_header_and_lists_the_review_steps():
+    text = dump_quote_request(DRAFT)
+    assert text.startswith(HEADER)
+    assert text.startswith("# Draft quote request written by the planner")
+    for word in ("services", "travelers", "margin", "review_hints", "needs_review: false"):
+        assert word in HEADER
+
+
+def test_dump_quotes_money_and_never_emits_a_float():
+    text = dump_quote_request(
+        {**DRAFT, "pricing": {"margin_rate": "0.25", "fx_rate": Decimal("3.5")}}
+    )
+    body = yaml.safe_load(text)
+    assert body["pricing"] == {"margin_rate": "0.25", "fx_rate": "3.5"}
+    assert 'margin_rate: "0.25"' in text or "margin_rate: '0.25'" in text
+
+
+def test_dump_keeps_an_unset_margin_null():
+    text = dump_quote_request({"pricing": {"margin_rate": None}})
+    assert yaml.safe_load(text)["pricing"] == {"margin_rate": None}
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"pricing": {"margin_rate": 0.25}},
+        {"travelers": {"adults": 2.0}},
+        {"options": [{"items": [{"id": "van", "quantity": 1.5}]}]},
+    ],
+)
+def test_dump_refuses_a_float_anywhere(data):
+    with pytest.raises(ValueError, match="float"):
+        dump_quote_request(data)
+
+
+def test_a_draft_round_trips_through_dump_and_the_no_float_loader():
+    loaded = yaml.load(dump_quote_request(DRAFT), _NoFloatLoader)
+    assert parse_quote_request(loaded) == parse_quote_request(DRAFT)
+    assert len(parse_quote_request(loaded).options) == 2
+
+
+def test_a_dumped_draft_marked_for_review_is_refused():
+    draft = {**DRAFT, "needs_review": True, "review_hints": ["Check the hotel"]}
+    loaded = yaml.load(dump_quote_request(draft), _NoFloatLoader)
+    with pytest.raises(RequestNeedsReview) as caught:
+        parse_quote_request(loaded)
+    assert caught.value.hints == ("Check the hotel",)

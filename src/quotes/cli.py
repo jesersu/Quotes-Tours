@@ -28,7 +28,11 @@ from quotes.infrastructure.latex.pdf import (
 from quotes.infrastructure.latex.quote_renderer import LatexQuoteRenderer, itinerary_day_count
 from quotes.infrastructure.output_file import OutputExists, write_new_file
 from quotes.infrastructure.postgres_catalog import PostgresCatalogRepository
-from quotes.infrastructure.quote_request_file import InvalidRequestFile, read_quote_request
+from quotes.infrastructure.quote_request_file import (
+    InvalidRequestFile,
+    RequestNeedsReview,
+    read_quote_request,
+)
 from quotes.infrastructure.settings import MissingSetting, database_url
 
 EXIT_OK = 0
@@ -188,6 +192,15 @@ def _quote_build(
         for problem in exc.problems:
             print(f"  - {problem}", file=err)
         return EXIT_UNAVAILABLE
+    except RequestNeedsReview as exc:
+        print("error: this request is a draft that still needs review.", file=err)
+        for hint in exc.hints:
+            print(f"  {hint}", file=err)
+        print(
+            f"Review {args.request}, set the margin and set needs_review: false, then run again.",
+            file=err,
+        )
+        return EXIT_CATALOG_ERRORS
     # LaTeX reads these through \input{} from a temporary folder, so they must be absolute.
     company = args.company.resolve()
     if not company.is_file():
