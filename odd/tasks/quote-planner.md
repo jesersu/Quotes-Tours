@@ -36,9 +36,18 @@ and tested (Phase 3), so the model only has to fill the request.
   `feat/planner-01-request-draft`. Evidence: RED recovered by stashing the two source files (CLI: 4
   failed, e.g. `assert 2 == 0` for a reviewed request; reader tests: `ImportError: cannot import name
   'HEADER'`), then GREEN: 756 passed, 20 skipped; ruff clean. Parent: readback of the writer and suite
-  spot check.
-- [ ] P2 — `application/planner.py`: price-free `PlannerCatalog` view, `QuotePlanner` protocol,
-  `PlannedRequest`; unknown ids become review hints; output goes through `parse_quote_request`.
+  spot check. Review: assess `medium`, 367 lines, not due (`under_budget`); pending in the slice.
+- [x] P2 — `application/planner.py`: price-free `PlannerItem` / `PlannerLocalPayment` / `PlannerCatalog`
+  built by `planner_catalog(catalog)`; `PlannedItem`, `PlannedExtra`, `PlannedDay`, `PlannedOption`,
+  `PlannedRequest`; `QuotePlanner` protocol; `PlannerUnavailable`. `to_request_data` writes the request
+  shape with `needs_review: true`, `signed_by: null` and `margin_rate: null` (the gate stops parsing
+  first; once cleared the reader asks for both), always adds the two owner-only hints, drops unknown
+  ids and empty extras with a hint each, and keeps an empty option with a hint. Route: delegated
+  writer. Branch `feat/planner-02-port` stacked on P1; commit `feat(application): add the price-free
+  planner port`. Evidence: RED (`ModuleNotFoundError: quotes.application.planner`) then GREEN 771
+  passed, 20 skipped; ruff clean; a test walks every view field and asserts no money and no
+  synthetic price string. Parent: readback (imports only `quotes.application.catalog`), suite spot
+  check.
 - [ ] P3 — Anthropic adapter: optional extra `[llm]`, `settings.anthropic_api_key(env)`, tool use with a
   JSON schema whose ids are an enum of catalog ids, `PlannerUnavailable`, fake client capturing the payload.
 - [ ] P4 — `quotes quote plan <message.txt> [-o] [--force]`: writes the draft under
@@ -61,4 +70,4 @@ stacked PR per task.
 - P1 started 2026-10-21 on branch `feat/planner-01-request-draft` from `main` (af07b29). Route: delegated writer (reader, CLI and their tests).
 
 ## Next step
-P2: the planner port and price-free catalog view.
+P3: the Anthropic adapter (optional `[llm]` extra, fake client in tests).
