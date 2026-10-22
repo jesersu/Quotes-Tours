@@ -48,10 +48,19 @@ Rules:
 or mentions an amount. Pricing is done elsewhere.
 - Infer the language of the quote ("es" or "en") from the message, plus the number of adults, \
 the ages of children, the number of days and the options the client asks for.
+- child_ages has one integer per child (two children aged 9 and 12 give [9, 12]); adults counts \
+only adults.
+- items must hold every service the requested trip needs: the transport, guide, meals and \
+entrances for the places the client asks for. Leave out services for places or tours the client \
+did not mention.
+- An optional service the client mentions conditionally goes in extras, never also in items.
+- Set quantity only for services whose unit is per_unit; never for per_person, per_day or \
+per_group.
 - When the message implies when a service happens, place it on those days with on_days. Give \
 each day a short title when the message makes it obvious.
-- Use the client's name as the message gives it; if it gives none, leave a short placeholder and \
-add a hint.
+- Use the client's name only if the message states it (a greeting such as Hello is not a \
+name); if it gives none, use an empty string for client \
+and add a hint asking for it.
 - Put every doubt, missing fact or assumption in hints, one short sentence each.
 - Use paid_locally only for the local payments listed in the catalog.
 """
@@ -90,7 +99,8 @@ def _item_schema(item_ids: list[str]) -> dict[str, Any]:
 def request_schema(catalog: PlannerCatalog) -> dict[str, Any]:
     """The JSON schema of ``PlannedRequest`` with the catalog ids as enums."""
     item = _item_schema(list(catalog.item_ids()))
-    items = {"type": "array", "items": item}
+    # minItems: a local model returned no options or services at all without it.
+    items = {"type": "array", "items": item, "minItems": 1}
     option = {
         "type": "object",
         "properties": {
@@ -132,14 +142,26 @@ def request_schema(catalog: PlannerCatalog) -> dict[str, Any]:
                 "type": "array",
                 "items": {"type": "integer", "minimum": 0, "maximum": 17},
             },
-            "options": {"type": "array", "items": option},
+            "options": {"type": "array", "items": option, "minItems": 1},
             "paid_locally": {
                 "type": "array",
                 "items": {"type": "string", "enum": list(catalog.local_payment_ids())},
             },
             "hints": {"type": "array", "items": {"type": "string"}},
         },
-        "required": ["client", "title", "language", "days", "adults", "options"],
+        # Every top-level field is required (a local model skipped the optional ones); nested
+        # objects keep short lists, because requiring every nested field made a run very slow.
+        "required": [
+            "client",
+            "title",
+            "language",
+            "days",
+            "adults",
+            "child_ages",
+            "options",
+            "paid_locally",
+            "hints",
+        ],
     }
 
 

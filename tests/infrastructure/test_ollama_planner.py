@@ -5,7 +5,13 @@ import urllib.request
 
 import pytest
 
-from quotes.application.planner import DayWriter, PlannedRequest, PlannerUnavailable, QuotePlanner
+from quotes.application.planner import (
+    DayWriter,
+    PlannedRequest,
+    PlannerCatalog,
+    PlannerUnavailable,
+    QuotePlanner,
+)
 from quotes.infrastructure.llm.ollama_planner import OllamaQuotePlanner
 from quotes.infrastructure.llm.planning_contract import DAY_TEXTS_SCHEMA, request_schema
 from tests.application.test_planner import SECRET, day_facts, placed_request
@@ -53,7 +59,7 @@ def test_it_posts_the_chat_request_with_the_schema_and_temperature_zero():
     assert timeout == 300.0
     assert payload["model"] == "model-x"
     assert payload["stream"] is False
-    assert payload["options"] == {"temperature": 0}
+    assert payload["options"] == {"temperature": 0, "num_predict": 2048}
     assert payload["format"] == request_schema(VIEW)
     item_ids = payload["format"]["properties"]["options"]["items"]["properties"]["items"]
     assert item_ids["items"]["properties"]["item_id"]["enum"] == ["van", "tour", "horse"]
@@ -112,7 +118,33 @@ def test_an_unreachable_server_says_how_to_start_it(error):
     assert MESSAGE not in str(caught.value)
 
 
-@pytest.mark.parametrize("error", [TimeoutError("slow"), ValueError(MESSAGE), RuntimeError("x")])
+@pytest.mark.parametrize(
+    "error",
+    [
+        TimeoutError("slow"),
+        urllib.error.URLError(TimeoutError("timed out")),
+    ],
+)
+def test_a_timeout_suggests_a_smaller_model(error):
+    with pytest.raises(PlannerUnavailable) as caught:
+        plan(FakeTransport(error=error))
+    assert str(caught.value) == (
+        f"planner request failed ({type(error).__name__}); the model took too long; "
+        "try a smaller one with QUOTES_LLM_MODEL"
+    )
+    assert "cannot reach Ollama" not in str(caught.value)
+    assert caught.value.__cause__ is error
+
+
+def test_an_empty_catalog_is_refused_before_any_call():
+    transport = FakeTransport(good_input())
+    planner = OllamaQuotePlanner(HOST, "model-x", transport)
+    with pytest.raises(PlannerUnavailable, match="^the catalog has no items to plan with$"):
+        planner.plan(MESSAGE, PlannerCatalog(), TODAY)
+    assert transport.calls == []
+
+
+@pytest.mark.parametrize("error", [ValueError(MESSAGE), RuntimeError("x")])
 def test_other_failures_keep_only_the_type_name(error):
     with pytest.raises(PlannerUnavailable) as caught:
         plan(FakeTransport(error=error))
@@ -128,7 +160,7 @@ def test_day_texts_use_their_own_schema_and_send_only_facts():
     assert url == f"{HOST}/api/chat"
     assert payload["format"] == DAY_TEXTS_SCHEMA
     assert payload["stream"] is False
-    assert payload["options"] == {"temperature": 0}
+    assert payload["options"] == {"temperature": 0, "num_predict": 2048}
     assert "never add" in payload["messages"][0]["content"].lower()
     assert "Private transfer" in payload["messages"][1]["content"]
     assert SECRET not in json.dumps(payload)

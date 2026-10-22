@@ -110,6 +110,38 @@ and tested (Phase 3), so the model only has to fill the request.
   `ImportError: cannot import name 'planner_from_env' from 'quotes.infrastructure.llm'`, missing
   `ollama_planner` and settings names) then GREEN 894 passed, 21 skipped; ruff clean. Parent: readback
   of the transport, suite spot check. Not done: the local trial with a real model.
+- [x] P7 — Planner quality from the first local trial (2026-10-21, owner OK to start Ollama and pull
+  `qwen2.5:14b`; invented example message; real catalog read-only). Findings: with optional top-level
+  fields both `qwen2.5:7b` and `qwen2.5:14b` returned `child_ages: []` for "two children aged 9 and
+  12" and skipped extras and paid-locally; the 7b also wrote day texts with invented facts (the catalog
+  has no descriptions yet). Requiring every nested field made the 14b run past 10 minutes. Requiring
+  only the top-level fields, adding explicit rules and capping output (`num_predict` 2048) gave
+  `child_ages: [9, 12]`, the horseback ride as an extra and the Colca ticket as paid locally in about
+  67 s, but still extra unrelated tickets, the ride duplicated in items, `quantity` on per-person
+  items and a "Client Name" placeholder. Scope: top-level fields required; output cap; prompt rules
+  (child ages, extras not duplicated, `quantity` only for `per_unit`, no unrequested services, client
+  name hint); deterministic guards in `to_request_data` (drop `quantity` unless `per_unit`, drop items
+  that are also extras, each with a hint); no day text for days without any description; refuse an
+  empty catalog before calling; a timeout hint suggesting a smaller model; keep `qwen2.5:14b` as the
+  Ollama default.
+  Done: top-level fields required; `options` and each option's `items` require `minItems: 1` (after
+  the writer's first version the 14b returned no options at all; found in the live rerun, fixed
+  test-first by the parent); rules for child ages, extras not duplicated, `quantity` only for
+  `per_unit`, "items must hold every service the requested trip needs ... leave out services for
+  places or tours the client did not mention", and "a greeting such as Hello is not a name";
+  `NUM_PREDICT = 2048`; guards in `to_request_data` (quantity dropped unless `per_unit`, items that are
+  also extras dropped, empty client → `client: null` + "Set client"), each with a hint; day text only
+  for days with a description in the request language; empty catalog refused by both adapters before
+  calling; timeout hint. Route: delegated writer plus a parent correction; commit `fix: keep the local
+  planner to the request and the catalog`. Evidence: writer RED 24 failed then GREEN; parent RED 4
+  failed (prompt phrases, minItems) then GREEN 917 passed, 21 skipped; ruff clean. Live rerun through
+  the CLI on the invented example: both models give `child_ages: [9, 12]`, the ride as an extra, the
+  Colca ticket paid locally and no invented name. `qwen2.5:7b` (29 s) picked transport, guide, lunch
+  and dinner; `qwen2.5:14b` (75 s) still added tickets for unrelated tours (the catalog has no region
+  or descriptions yet). `quote build` refused the draft (exit 1); a reviewed copy (placeholder margin)
+  built a 2-page English PDF, checked by eye. Follow-ups: one hint per dropped `quantity` is noisy
+  (aggregate it); day titles repeat "Day 1:" already shown by `\dayhead`; choose the default model on
+  a real message after the catalog has regions and descriptions.
 
 ## Acceptance criteria
 - A real client message produces a draft that, after owner review, builds a PDF with `quote build`.
@@ -119,10 +151,15 @@ and tested (Phase 3), so the model only has to fill the request.
 - P1 + P2 (range af07b29..fab57d7, 893 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-a36306bd5bdf03cd); no advisories.
 - P3 (range fab57d7..ef40fa3, 648 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-968287d6103ef8ad). SUGGESTIONs: `R3-missing-key-order` (`planner_from_env` checks the extra before the key) and `R3-parse-range` (the adapter does not range-check numbers; `parse_quote_request` does later). Follow-ups.
 - P4 + P5 (range ef40fa3..0630ff0, 945 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-6a52c98d3070dde0). SUGGESTION `R3-unknown-label-untested` (`with_day_texts` unknown-label branch has no test): added in P6.
+- P6 (range 0630ff0..8e03b78, 1145 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-b2457bace522f0b3). SUGGESTIONs: `R3-factory-import-order`, `R3-ollama-empty-schema-enum` (an empty catalog gives an empty enum), `R3-ollama-timeout-hint` (a timeout gets no specific hint); the last two are taken into P7.
+- P7 (range 8e03b78..d46bf6f, 366 lines): assess medium; reviewed at the owner's request before merging (2026-10-22); consent granted; one lens (reliability); approved and acknowledged (lineage review-5af47dd0b40cb71c). SUGGESTION `R3-001`: `NUM_PREDICT` 2048 covers both calls; a reply cut at the cap would show only "unexpected planner output", untested. Follow-up: name the cap in that error (Ollama reports `done_reason: "length"`).
 
 ## Delivery
 Strategy `ask-on-risk`; forecast about 1.6k authored lines (P1 300, P2 300, P3 350, P4 250, P5 400); one
 stacked PR per task.
+Pushed 2026-10-22 (owner OK), stacked to main, one commit per PR: #18 P1 90ef631, #19 P2 fab57d7,
+#20 P3 ef40fa3, #21 P4 5440665, #22 P5 0630ff0, #23 P6 8e03b78, #24 P7 d46bf6f. CI green on all
+seven. Retarget each to `main` before merging it (`deleteBranchOnMerge` is off).
 
 ## Progress
 - T7–T9 merged into `main` (PRs #15–#17, af07b29); colcaStarTours migration merged (#98) and applied.
@@ -130,6 +167,5 @@ stacked PR per task.
 - P1 started 2026-10-21 on branch `feat/planner-01-request-draft` from `main` (af07b29). Route: delegated writer (reader, CLI and their tests).
 
 ## Next step
-Local trial: `ollama serve`, pull the model (owner OK for the download), run `quote plan` on the
-invented example message, then on a real one; confirm or change `DEFAULT_OLLAMA_MODEL`. For Anthropic only — first live run: needs the owner's `ANTHROPIC_API_KEY` in `.env`, `pip install -e ".[llm]"`, and the
-owner's authorization to send a real client message to Anthropic. Then push P1–P5 as stacked PRs.
+Owner reviews and merges #18–#24 in order (all seven natively reviewed).
+Then the owner writes regions and descriptions, and a real client message chooses the default model.

@@ -150,11 +150,11 @@ def test_several_options_use_the_options_key():
 
 
 def test_item_fields_are_written_only_when_set():
-    items = (PlannedItem("van", on_days=(1, 2), days=2, quantity=3), PlannedItem("tour"))
+    items = (PlannedItem("horse", on_days=(1, 2), days=2, quantity=3), PlannedItem("tour"))
     option = PlannedOption(None, None, None, items)
     data = to_request_data(request(options=(option,)), VIEW)
     assert data["items"] == [
-        {"id": "van", "on_days": [1, 2], "days": 2, "quantity": 3},
+        {"id": "horse", "on_days": [1, 2], "days": 2, "quantity": 3},
         {"id": "tour"},
     ]
 
@@ -303,9 +303,35 @@ def test_day_facts_skip_days_without_title_or_services_and_unknown_ids():
 
 def test_day_facts_are_per_option_and_carry_the_label():
     first = PlannedOption("A", None, None, (PlannedItem("van", on_days=(1,)),))
-    second = PlannedOption("B", None, 1, (PlannedItem("tour", on_days=(1,)),))
+    second = PlannedOption("B", None, 1, (PlannedItem("van", on_days=(1,)),))
     facts = day_facts(request(options=(first, second)), VIEW)
     assert [(f.option_label, f.day) for f in facts] == [("A", 1), ("B", 1)]
+
+
+def test_day_facts_skip_days_where_no_service_has_a_description_in_the_language():
+    # "tour" has no description at all; "van" has Spanish and English ones.
+    option = PlannedOption(
+        None,
+        None,
+        None,
+        (PlannedItem("van", on_days=(1,)), PlannedItem("tour", on_days=(1, 2))),
+        itinerary=(PlannedDay(2, "Free day"),),
+    )
+    facts = day_facts(request(options=(option,)), VIEW)
+    assert [f.day for f in facts] == [1]
+    assert day_facts(request(options=(option,), language="es"), VIEW)[0].day == 1
+    only_english = PlannerCatalog(
+        items=(dataclasses.replace(VIEW.items[0], description_es=None), *VIEW.items[1:])
+    )
+    assert day_facts(request(options=(option,), language="es"), only_english) == ()
+    assert day_facts(request(options=(option,)), only_english)[0].day == 1
+
+
+def test_a_title_alone_does_not_make_a_day_eligible_for_text():
+    option = PlannedOption(
+        None, None, None, (PlannedItem("tour", on_days=(1,)),), itinerary=(PlannedDay(1, "Tour"),)
+    )
+    assert day_facts(request(options=(option,)), VIEW) == ()
 
 
 def test_day_facts_ignore_days_beyond_the_request():
@@ -343,7 +369,7 @@ def test_with_day_texts_fills_the_top_level_itinerary_of_a_plain_request():
 def test_with_day_texts_fills_each_option():
     first = PlannedOption("A", None, None, (PlannedItem("van", on_days=(1,)),))
     second = PlannedOption(
-        "B", None, None, (PlannedItem("tour", on_days=(1,)),), itinerary=(PlannedDay(1, "Walk"),)
+        "B", None, None, (PlannedItem("van", on_days=(1,)),), itinerary=(PlannedDay(1, "Walk"),)
     )
     planned = request(options=(first, second))
     facts = day_facts(planned, VIEW)
@@ -381,3 +407,72 @@ def test_with_day_texts_rejects_an_option_label_that_matches_no_option():
     stray = DayFacts("Missing", 1, None, (DayService("Van", None),))
     with pytest.raises(PlannerUnavailable, match="^unexpected planner output$"):
         with_day_texts(data, (stray,), ("Some text",))
+
+
+# --- deterministic guards ---
+
+
+def guarded(options, **overrides):
+    return to_request_data(request(options=options, **overrides), VIEW)
+
+
+def test_quantity_is_dropped_unless_the_unit_is_per_unit():
+    option = PlannedOption(
+        None,
+        None,
+        None,
+        (PlannedItem("tour", quantity=3), PlannedItem("horse", quantity=2)),
+        extras=(PlannedExtra("Ride", (PlannedItem("van", quantity=4),)),),
+    )
+    data = guarded((option,))
+    assert data["items"] == [{"id": "tour"}, {"id": "horse", "quantity": 2}]
+    assert data["extras"] == [{"label": "Ride", "items": [{"id": "van"}]}]
+    hints = data["review_hints"]
+    assert "Removed quantity from 'tour': its unit is per_person, not per_unit" in hints
+    assert "Removed quantity from 'van': its unit is per_group, not per_unit" in hints
+    assert not any("'horse'" in hint for hint in hints)
+
+
+def test_an_item_that_is_also_an_extra_is_dropped_from_the_items():
+    option = PlannedOption(
+        None,
+        None,
+        None,
+        (PlannedItem("van"), PlannedItem("horse")),
+        extras=(PlannedExtra("Ride", (PlannedItem("horse"),)),),
+    )
+    data = guarded((option,))
+    assert data["items"] == [{"id": "van"}]
+    assert data["extras"] == [{"label": "Ride", "items": [{"id": "horse"}]}]
+    assert any("'horse'" in hint and "extra" in hint for hint in data["review_hints"])
+
+
+def test_the_duplicate_check_is_per_option():
+    first = PlannedOption("A", None, None, (PlannedItem("van"),))
+    second = PlannedOption(
+        "B",
+        None,
+        None,
+        (PlannedItem("tour"),),
+        extras=(PlannedExtra("Ride", (PlannedItem("van"),)),),
+    )
+    data = guarded((first, second))
+    assert data["options"][0]["items"] == [{"id": "van"}]
+    assert data["options"][1]["items"] == [{"id": "tour"}]
+
+
+@pytest.mark.parametrize("client", ["", "   "])
+def test_an_empty_client_becomes_none_with_a_hint_and_stays_parseable(client):
+    data = guarded((PlannedOption(None, None, None, (PlannedItem("van"),)),), client=client)
+    assert data["client"] is None
+    assert "Set client" in data["review_hints"]
+    with pytest.raises(RequestNeedsReview) as caught:
+        parse_quote_request(data)
+    assert "Set client" in caught.value.hints
+    assert dump_quote_request(data)
+
+
+def test_a_given_client_is_kept_without_the_hint():
+    data = to_request_data(request(), VIEW)
+    assert data["client"] == "Smith family"
+    assert "Set client" not in data["review_hints"]

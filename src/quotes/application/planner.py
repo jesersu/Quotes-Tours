@@ -196,19 +196,32 @@ def _item_data(item: PlannedItem) -> dict[str, Any]:
 
 
 def _known_items(
-    items: tuple[PlannedItem, ...], known: set[str], where: str, hints: list[str]
+    items: tuple[PlannedItem, ...],
+    units: dict[str, str],
+    where: str,
+    hints: list[str],
+    skip: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     kept: list[dict[str, Any]] = []
     for item in items:
-        if item.item_id in known:
-            kept.append(_item_data(item))
-        else:
+        if item.item_id not in units:
             hints.append(f"Removed unknown item id '{item.item_id}' from {where}")
+        elif item.item_id in skip:
+            hints.append(f"Removed '{item.item_id}' from {where}: it is also an extra")
+        else:
+            data = _item_data(item)
+            if item.quantity is not None and units[item.item_id] != "per_unit":
+                del data["quantity"]
+                hints.append(
+                    f"Removed quantity from '{item.item_id}': its unit is "
+                    f"{units[item.item_id]}, not per_unit"
+                )
+            kept.append(data)
     return kept
 
 
 def _option_data(
-    option: PlannedOption, known: set[str], where: str, hints: list[str]
+    option: PlannedOption, units: dict[str, str], where: str, hints: list[str]
 ) -> dict[str, Any]:
     data: dict[str, Any] = {}
     if option.label is not None:
@@ -217,12 +230,13 @@ def _option_data(
         data["subtitle"] = option.subtitle
     if option.days is not None:
         data["days"] = option.days
-    data["items"] = _known_items(option.items, known, where, hints)
+    extra_ids = frozenset(i.item_id for extra in option.extras for i in extra.items)
+    data["items"] = _known_items(option.items, units, where, hints, extra_ids)
     if not data["items"]:
         hints.append(f"{where} has no items; add services or remove it")
     extras: list[dict[str, Any]] = []
     for extra in option.extras:
-        items = _known_items(extra.items, known, f"extra '{extra.label}' of {where}", hints)
+        items = _known_items(extra.items, units, f"extra '{extra.label}' of {where}", hints)
         if items:
             extras.append({"label": extra.label, "items": items})
         else:
@@ -238,18 +252,22 @@ def to_request_data(planned: PlannedRequest, catalog: PlannerCatalog) -> dict[st
     """The request-file data for a planned request: a draft with ``needs_review: true``.
 
     Unknown item ids and unknown paid-locally ids are dropped, each with a hint naming the id.
+    So are a ``quantity`` on an item whose unit is not ``per_unit`` and an item that the same
+    option also lists as an extra. A blank client is written as ``None`` with a "Set client" hint.
     """
     hints: list[str] = list(planned.hints)
+    if not planned.client.strip():
+        hints.append("Set client")
     hints.append("Set signed_by")
     hints.append("Set pricing.margin_rate")
-    known = set(catalog.item_ids())
+    units = {item.id: item.unit for item in catalog.items}
     options = planned.options or (PlannedOption(None, None, None, ()),)
     several = len(options) > 1 or any(o.label is not None for o in options)
 
     data: dict[str, Any] = {
         "needs_review": True,
         "review_hints": hints,
-        "client": planned.client,
+        "client": planned.client if planned.client.strip() else None,
         "title": planned.title,
         "language": planned.language,
         "signed_by": None,  # owner-only; the reader asks for it once the draft is reviewed
@@ -259,11 +277,11 @@ def to_request_data(planned: PlannedRequest, catalog: PlannerCatalog) -> dict[st
     }
     if several:
         data["options"] = [
-            _option_data(option, known, f"option '{option.label or index}'", hints)
+            _option_data(option, units, f"option '{option.label or index}'", hints)
             for index, option in enumerate(options, start=1)
         ]
     else:
-        option_data = _option_data(options[0], known, "the request", hints)
+        option_data = _option_data(options[0], units, "the request", hints)
         data.update(
             {
                 key: option_data[key]
@@ -286,8 +304,9 @@ def to_request_data(planned: PlannedRequest, catalog: PlannerCatalog) -> dict[st
 def day_facts(planned: PlannedRequest, catalog: PlannerCatalog) -> tuple[DayFacts, ...]:
     """The facts per option and day: the title and the catalog's own names and descriptions.
 
-    Only days of the request that have a title or a placed service appear. Unknown ids are
-    skipped, as ``to_request_data`` drops them. No price is involved.
+    Only days where at least one placed service has a description in the request language appear:
+    without one the writer would have nothing but names to go on and would invent. Unknown ids
+    are skipped, as ``to_request_data`` drops them. No price is involved.
     """
     spanish = planned.language == "es"
     by_id = {item.id: item for item in catalog.items}
@@ -307,7 +326,7 @@ def day_facts(planned: PlannedRequest, catalog: PlannerCatalog) -> tuple[DayFact
                 )
                 services.append(DayService(name, description))
             title = titles.get(number)
-            if title is not None or services:
+            if any(service.description for service in services):
                 facts.append(DayFacts(option.label, number, title, tuple(services)))
     return tuple(facts)
 

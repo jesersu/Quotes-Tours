@@ -28,13 +28,21 @@ CLIENT = "Zorro family"
 HINT = "Ask whether the Zorro children need a car seat"
 
 
-def entry(item_id: str, unit: PricingUnit) -> CatalogEntry:
+def entry(item_id: str, unit: PricingUnit, described: bool = True) -> CatalogEntry:
     item = CatalogItem(item_id, item_id, Money(Decimal(PRICE), Currency.PEN), unit)
-    return CatalogEntry(item, "tour", item_id, item_id)
+    description = f"About {item_id}" if described else None
+    return CatalogEntry(item, "tour", item_id, item_id, description_en=description)
 
 
 def catalog() -> Catalog:
-    return Catalog([entry("van", PricingUnit.PER_GROUP), entry("guide", PricingUnit.PER_DAY)], [])
+    return Catalog(
+        [
+            entry("van", PricingUnit.PER_GROUP),
+            entry("guide", PricingUnit.PER_DAY),
+            entry("bare", PricingUnit.PER_GROUP, described=False),
+        ],
+        [],
+    )
 
 
 def planned(**overrides) -> PlannedRequest:
@@ -149,7 +157,7 @@ def test_the_planner_gets_the_message_a_price_free_view_and_today(message, tmp_p
     plan(message, tmp_path, planner=fake)
     [(seen_message, view, seen_today)] = fake.calls
     assert seen_message == MESSAGE
-    assert view.item_ids() == ("van", "guide")
+    assert view.item_ids() == ("van", "guide", "bare")
     assert seen_today == date(2026, 10, 14)
     assert PRICE not in repr(view)
 
@@ -360,3 +368,20 @@ def test_a_day_writer_with_the_wrong_count_exits_two(message, tmp_path):
     assert code == 2
     assert "unexpected planner output" in err
     assert not (tmp_path / "draft.yaml").exists()
+
+
+def test_days_without_any_description_get_no_text_request(message, tmp_path):
+    option = PlannedOption(
+        None,
+        None,
+        None,
+        (PlannedItem("bare", on_days=(1,)),),
+        itinerary=(PlannedDay(1, "Arrival"),),
+    )
+    fake = FakeDayPlanner(answer=planned(options=(option,)))
+    code, out, _ = plan(message, tmp_path, planner=fake)
+    assert code == 0
+    assert fake.day_calls == []
+    assert "day texts" not in out
+    draft = yaml.safe_load((tmp_path / "draft.yaml").read_text(encoding="utf-8"))
+    assert draft["itinerary"] == [{"day": 1, "title": "Arrival"}]

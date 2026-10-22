@@ -39,6 +39,9 @@ from quotes.infrastructure.llm.planning_contract import (
 
 __all__ = ["OllamaQuotePlanner"]
 
+# Caps the reply so a small model cannot ramble for minutes; a full draft fits well inside it.
+NUM_PREDICT = 2048
+
 Transport = Callable[[str, dict[str, Any], float], dict[str, Any]]
 
 
@@ -51,6 +54,12 @@ def _urllib_transport(url: str, payload: dict[str, Any], timeout: float) -> dict
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _is_timeout(exc: Exception) -> bool:
+    if isinstance(exc, urllib.error.URLError) and not isinstance(exc, urllib.error.HTTPError):
+        exc = exc.reason  # type: ignore[assignment]
+    return isinstance(exc, TimeoutError)  # socket.timeout is an alias of it since Python 3.10
 
 
 class OllamaQuotePlanner:
@@ -69,6 +78,8 @@ class OllamaQuotePlanner:
         self._timeout = timeout
 
     def plan(self, message: str, catalog: PlannerCatalog, today: datetime.date) -> PlannedRequest:
+        if not catalog.items:
+            raise PlannerUnavailable("the catalog has no items to plan with")
         content = self._chat(
             PLAN_SYSTEM_PROMPT, plan_user_content(message, catalog, today), request_schema(catalog)
         )
@@ -89,7 +100,7 @@ class OllamaQuotePlanner:
             ],
             "stream": False,
             "format": schema,
-            "options": {"temperature": 0},
+            "options": {"temperature": 0, "num_predict": NUM_PREDICT},
         }
         try:
             response = self._transport(f"{self._host}/api/chat", payload, self._timeout)
@@ -100,7 +111,9 @@ class OllamaQuotePlanner:
                 isinstance(exc, urllib.error.URLError)
                 and not isinstance(exc, urllib.error.HTTPError)
             )
-            if unreachable:
+            if _is_timeout(exc):
+                message += "; the model took too long; try a smaller one with QUOTES_LLM_MODEL"
+            elif unreachable:
                 message += f"; cannot reach Ollama at {self._host}; start it with: ollama serve"
             raise PlannerUnavailable(message) from exc
         try:
