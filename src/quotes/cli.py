@@ -1,4 +1,4 @@
-"""Command-line entry point: ``quotes catalog check|draft|sql`` and ``quotes quote build``."""
+"""Command-line entry point: ``quotes catalog check|draft|sql`` and ``quotes quote build|plan``."""
 
 from __future__ import annotations
 
@@ -13,6 +13,12 @@ import psycopg
 
 from quotes.application.catalog import CatalogLoad, CatalogRepository
 from quotes.application.catalog_proposal import propose_catalog
+from quotes.application.planner import (
+    PlannerUnavailable,
+    QuotePlanner,
+    planner_catalog,
+    to_request_data,
+)
 from quotes.application.quote import build_quote_options
 from quotes.application.quote_rendering import QuoteDocument
 from quotes.domain.errors import DomainError
@@ -26,11 +32,13 @@ from quotes.infrastructure.latex.pdf import (
     compile_pdf,
 )
 from quotes.infrastructure.latex.quote_renderer import LatexQuoteRenderer, itinerary_day_count
+from quotes.infrastructure.llm.anthropic_planner import planner_from_env
 from quotes.infrastructure.output_file import OutputExists, write_new_file
 from quotes.infrastructure.postgres_catalog import PostgresCatalogRepository
 from quotes.infrastructure.quote_request_file import (
     InvalidRequestFile,
     RequestNeedsReview,
+    dump_quote_request,
     read_quote_request,
 )
 from quotes.infrastructure.settings import MissingSetting, database_url
@@ -74,6 +82,12 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--force", action="store_true", help="overwrite an existing output file")
     build.add_argument("--company", type=Path, default=DEFAULT_COMPANY, help="company .tex file")
     build.add_argument("--assets", type=Path, default=DEFAULT_ASSETS, help="brand images folder")
+    plan = quote_commands.add_parser("plan", help="draft a quote request from a client message")
+    plan.add_argument("message", type=Path, help="text file with the client's message")
+    plan.add_argument(
+        "-o", "--output", type=Path, help=f"default: {DEFAULT_QUOTES_DIR}/<message name>.yaml"
+    )
+    plan.add_argument("--force", action="store_true", help="overwrite an existing output file")
     return parser
 
 
@@ -267,6 +281,77 @@ def _quote_build(
     return EXIT_OK
 
 
+def _read_message(path: Path, err: TextIO) -> str | None:
+    """The client's message, or print the error (naming only the path) and return None."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        print(f"error: message file not found: {path}", file=err)
+        return None
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"error: cannot read {path} ({type(exc).__name__})", file=err)
+        return None
+    if not text.strip():
+        print(f"error: message file is empty: {path}", file=err)
+        return None
+    return text
+
+
+def _quote_plan(
+    args: argparse.Namespace,
+    repository: CatalogRepository | None,
+    env: Mapping[str, str] | None,
+    out: TextIO,
+    err: TextIO,
+    today: Callable[[], date],
+    planner: QuotePlanner | None,
+) -> int:
+    output = args.output or DEFAULT_QUOTES_DIR / f"{args.message.stem}.yaml"
+    if output.resolve() == args.message.resolve():
+        print("error: the output would overwrite the message file; choose another -o", file=err)
+        return EXIT_UNAVAILABLE
+    message = _read_message(args.message, err)
+    if message is None:
+        return EXIT_UNAVAILABLE
+    loaded = _load_catalog(repository, env, err)
+    if loaded is None:
+        return EXIT_UNAVAILABLE
+    view = planner_catalog(loaded.catalog)
+    try:
+        chosen = planner if planner is not None else planner_from_env(env)
+        planned = chosen.plan(message, view, today())
+    except (MissingSetting, PlannerUnavailable) as exc:
+        print(f"error: {exc}", file=err)
+        return EXIT_UNAVAILABLE
+    data = to_request_data(planned, view)
+    try:
+        write_new_file(output, dump_quote_request(data), force=args.force)
+    except OutputExists as exc:
+        print(f"error: {exc}", file=err)
+        return EXIT_UNAVAILABLE
+    except OSError as exc:
+        print(f"error: cannot write {output} ({type(exc).__name__})", file=err)
+        return EXIT_UNAVAILABLE
+    if loaded.issues:
+        print(
+            f"warning: the catalog reported {len(loaded.issues)} issue(s); "
+            "run `quotes catalog check` for details.",
+            file=err,
+        )
+    options = data.get("options") or [data]
+    print("Draft written", file=out)
+    print(f"  written to: {output}", file=out)
+    print(f"  options: {len(options)}", file=out)
+    print(f"  services: {sum(len(option.get('items', ())) for option in options)}", file=out)
+    print(f"  hints: {len(data['review_hints'])}", file=out)
+    print(
+        "Review it, set signed_by and pricing.margin_rate, set needs_review: false, "
+        f"then run: quotes quote build {output}",
+        file=out,
+    )
+    return EXIT_OK
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -276,10 +361,15 @@ def main(
     err: TextIO | None = None,
     today: Callable[[], date] | None = None,
     compile: Callable[..., PdfResult] | None = None,
+    planner: QuotePlanner | None = None,
 ) -> int:
     args = _parser().parse_args(argv)
     out = sys.stdout if out is None else out
     err = sys.stderr if err is None else err
+    if args.command == "quote" and args.quote_command == "plan":
+        return _quote_plan(
+            args, repository, env, out, err, today if today is not None else date.today, planner
+        )
     if args.command == "quote":
         return _quote_build(
             args,

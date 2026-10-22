@@ -64,8 +64,17 @@ and tested (Phase 3), so the model only has to fill the request.
   (`QUOTES_LIVE_LLM=1` plus the key) so a loaded `.env` never makes an ordinary run call the paid API.
   Pending for the owner: add `ANTHROPIC_API_KEY` (and optionally `QUOTES_LLM_MODEL`) to `.env` and
   `.env.example`, which the agent does not read.
-- [ ] P4 — `quotes quote plan <message.txt> [-o] [--force]`: writes the draft under
-  `data/private/quotes/`, prints path and counts only; CLI dispatch on `quote_command`; `main(planner=)`.
+- [x] P4 — `quotes quote plan <message.txt> [-o OUTPUT] [--force]`: reads the message (path-only errors),
+  loads the catalog read-only (the planner is built only after it loads), plans, and writes the draft
+  with `dump_quote_request` + `write_new_file`; default `data/private/quotes/<stem>.yaml`; refuses to
+  overwrite the message itself; prints only the path and counts (options, services, hints, the hints
+  count includes the two owner-only reminders); `MissingSetting` and `PlannerUnavailable` exit 2. CLI
+  dispatch on `quote_command`; `main(planner=)` seam. `examples/client-message.example.txt` (invented).
+  Route: delegated writer; branch `feat/planner-04-cli` stacked on P3; commit `feat(cli): draft a
+  quote request from a client message`. Evidence: RED 21 failed (no `planner` keyword, no
+  `planner_from_env` in the CLI) then GREEN 824 passed, 21 skipped; ruff clean; the gate end to end:
+  `quote build` on a fresh draft exits 1. Parent: readback of the output lines, suite spot check.
+  Not done: the live run, which needs the owner's key and authorization to send a real message.
 - [ ] P5 — Day text: `DayFacts` + `DayWriter` port; a second forced tool `write_day_texts` joins each
   day's descriptions into a paragraph stored as `itinerary[].text` (still `needs_review: true`); the
   renderer prints it under `\dayhead`, then the service names; without text the output is unchanged.
@@ -76,6 +85,7 @@ and tested (Phase 3), so the model only has to fill the request.
 
 ## Review log
 - P1 + P2 (range af07b29..fab57d7, 893 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-a36306bd5bdf03cd); no advisories.
+- P3 (range fab57d7..ef40fa3, 648 lines): assess medium, `slice_budget_reached`; consent granted; one lens (reliability); approved and acknowledged (lineage review-968287d6103ef8ad). SUGGESTIONs: `R3-missing-key-order` (`planner_from_env` checks the extra before the key) and `R3-parse-range` (the adapter does not range-check numbers; `parse_quote_request` does later). Follow-ups.
 
 ## Delivery
 Strategy `ask-on-risk`; forecast about 1.6k authored lines (P1 300, P2 300, P3 350, P4 250, P5 400); one
@@ -87,4 +97,4 @@ stacked PR per task.
 - P1 started 2026-10-21 on branch `feat/planner-01-request-draft` from `main` (af07b29). Route: delegated writer (reader, CLI and their tests).
 
 ## Next step
-P4: `quotes quote plan <message.txt>`.
+P5: day text. The first live run needs the owner's `ANTHROPIC_API_KEY` and authorization.
