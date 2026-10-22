@@ -371,3 +371,13 @@ def test_a_draft_with_day_texts_parses_once_reviewed():
     data["itinerary"] = [{"day": 2, "title": "Back"}]
     data = with_day_texts(data, day_facts(placed_request(), VIEW), ("One", "Two"))
     assert {"day": 2, "title": "Back", "text": "Two"} in data["itinerary"]
+
+
+def test_with_day_texts_rejects_an_option_label_that_matches_no_option():
+    first = PlannedOption("A", None, None, (PlannedItem("van", on_days=(1,)),))
+    second = PlannedOption("B", None, None, (PlannedItem("tour", on_days=(1,)),))
+    planned = request(options=(first, second))
+    data = to_request_data(planned, VIEW)
+    stray = DayFacts("Missing", 1, None, (DayService("Van", None),))
+    with pytest.raises(PlannerUnavailable, match="^unexpected planner output$"):
+        with_day_texts(data, (stray,), ("Some text",))

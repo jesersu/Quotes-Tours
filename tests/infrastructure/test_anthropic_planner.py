@@ -1,7 +1,6 @@
 import datetime
 import json
 import os
-import sys
 from types import SimpleNamespace
 
 import pytest
@@ -23,9 +22,8 @@ from quotes.infrastructure.llm.anthropic_planner import (
     DAY_TOOL_NAME,
     TOOL_NAME,
     AnthropicQuotePlanner,
-    planner_from_env,
 )
-from quotes.infrastructure.settings import MissingSetting
+from quotes.infrastructure.llm.factory import planner_from_env
 from tests.application.test_planner import SECRET, make_catalog
 
 VIEW = planner_catalog(make_catalog())
@@ -270,38 +268,6 @@ def test_provider_errors_keep_only_the_type_name():
     assert MESSAGE not in str(caught.value)
 
 
-def test_planner_from_env_explains_the_missing_extra(monkeypatch):
-    monkeypatch.setitem(sys.modules, "anthropic", None)
-    with pytest.raises(PlannerUnavailable, match=r"\[llm\] extra"):
-        planner_from_env({"ANTHROPIC_API_KEY": "sk-test"})
-
-
-def fake_anthropic(monkeypatch):
-    created = []
-
-    class Anthropic:
-        def __init__(self, api_key):
-            created.append(api_key)
-            self.messages = FakeMessages()
-
-    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(Anthropic=Anthropic))
-    return created
-
-
-def test_planner_from_env_builds_a_client_and_reads_the_model(monkeypatch):
-    created = fake_anthropic(monkeypatch)
-    planner = planner_from_env({"ANTHROPIC_API_KEY": "sk-test", "QUOTES_LLM_MODEL": "m-1"})
-    assert isinstance(planner, AnthropicQuotePlanner)
-    assert created == ["sk-test"]
-    assert planner._model == "m-1"
-
-
-def test_planner_from_env_requires_the_key(monkeypatch):
-    fake_anthropic(monkeypatch)
-    with pytest.raises(MissingSetting, match="ANTHROPIC_API_KEY"):
-        planner_from_env({"ANTHROPIC_API_KEY": " "})
-
-
 @pytest.mark.llm
 # Opt-in only: a loaded .env must never make an ordinary test run call the paid API.
 @pytest.mark.skipif(
@@ -309,7 +275,9 @@ def test_planner_from_env_requires_the_key(monkeypatch):
     reason="set QUOTES_LIVE_LLM=1 and ANTHROPIC_API_KEY to call the real API",
 )
 def test_live_planner_answers():  # pragma: no cover - never runs in CI
-    planned = planner_from_env().plan(MESSAGE, VIEW, TODAY)
+    planned = planner_from_env({**os.environ, "QUOTES_LLM_PROVIDER": "anthropic"}).plan(
+        MESSAGE, VIEW, TODAY
+    )
     assert planned.adults >= 1
 
 

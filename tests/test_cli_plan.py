@@ -18,7 +18,7 @@ from quotes.cli import main
 from quotes.domain.catalog import CatalogItem, PricingUnit
 from quotes.domain.money import Currency, Money
 from quotes.infrastructure.in_memory_catalog import InMemoryCatalogRepository
-from quotes.infrastructure.settings import MissingSetting
+from quotes.infrastructure.settings import InvalidSetting, MissingSetting
 
 # Synthetic numbers chosen so they cannot appear in the output by accident.
 PRICE = "777.77"
@@ -247,6 +247,16 @@ def test_a_missing_api_key_exits_two(message, tmp_path, monkeypatch):
     code, _, err = plan(message, tmp_path)
     assert code == 2
     assert "error: ANTHROPIC_API_KEY is not set" in err
+
+
+def test_an_invalid_provider_exits_two(message, tmp_path, monkeypatch):
+    def bad_provider(env=None):
+        raise InvalidSetting("QUOTES_LLM_PROVIDER must be one of: ollama, anthropic.")
+
+    monkeypatch.setattr(cli, "planner_from_env", bad_provider)
+    code, _, err = plan(message, tmp_path)
+    assert code == 2
+    assert "error: QUOTES_LLM_PROVIDER must be one of" in err
 
 
 def test_a_missing_llm_extra_exits_two(message, tmp_path, monkeypatch):
