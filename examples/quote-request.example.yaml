@@ -41,6 +41,7 @@ pricing:
 itinerary:
   - day: 1
     title: Arequipa - Chivay
+    text: A short paragraph for the day   # optional, printed before the day's services
   - day: 2
     title: Colca Canyon - Arequipa
 items:

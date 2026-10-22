@@ -8,6 +8,7 @@ import yaml
 from quotes import cli
 from quotes.application.catalog import Catalog, CatalogEntry, CatalogIssue
 from quotes.application.planner import (
+    PlannedDay,
     PlannedItem,
     PlannedOption,
     PlannedRequest,
@@ -278,3 +279,74 @@ def test_a_fresh_draft_is_refused_by_quote_build(message, tmp_path):
     code, _, err = run(["quote", "build", str(draft), "--company", str(company)], compile=never)
     assert code == 1
     assert "still needs review" in err
+
+
+# --- day texts ---
+
+DAY_TEXT = "Generated paragraph about the first day"
+
+
+class FakeDayPlanner(FakePlanner):
+    def __init__(self, texts=None, raises=None, answer=None):
+        super().__init__(answer)
+        self.texts = texts
+        self.day_raises = raises
+        self.day_calls = []
+
+    def write_days(self, days, language):
+        self.day_calls.append((days, language))
+        if self.day_raises is not None:
+            raise self.day_raises
+        return self.texts if self.texts is not None else tuple(DAY_TEXT for _ in days)
+
+
+def placed() -> PlannedRequest:
+    option = PlannedOption(
+        None, None, None, (PlannedItem("van", on_days=(1,)),), itinerary=(PlannedDay(1, "Arrival"),)
+    )
+    return planned(options=(option,))
+
+
+def test_day_texts_land_in_the_draft_and_only_the_count_is_printed(message, tmp_path):
+    fake = FakeDayPlanner(answer=placed())
+    code, out, err = plan(message, tmp_path, planner=fake)
+    assert code == 0
+    assert "day texts: 1" in out
+    assert DAY_TEXT not in out + err
+    ((days, language),) = fake.day_calls
+    assert language == "en"
+    assert days[0].title == "Arrival"
+    draft = yaml.safe_load((tmp_path / "draft.yaml").read_text(encoding="utf-8"))
+    assert draft["itinerary"] == [{"day": 1, "title": "Arrival", "text": DAY_TEXT}]
+
+
+def test_a_planner_without_write_days_prints_no_day_texts(message, tmp_path):
+    code, out, _ = plan(message, tmp_path, planner=FakePlanner(placed()))
+    assert code == 0
+    assert "day texts" not in out
+
+
+def test_no_facts_means_the_writer_is_not_called(message, tmp_path):
+    fake = FakeDayPlanner()
+    code, out, _ = plan(message, tmp_path, planner=fake)
+    assert code == 0
+    assert fake.day_calls == []
+    assert "day texts" not in out
+
+
+def test_a_failing_day_writer_exits_two_and_writes_nothing(message, tmp_path):
+    fake = FakeDayPlanner(
+        raises=PlannerUnavailable("planner request failed (Boom)"), answer=placed()
+    )
+    code, out, err = plan(message, tmp_path, planner=fake)
+    assert code == 2
+    assert "planner request failed (Boom)" in err
+    assert not (tmp_path / "draft.yaml").exists()
+
+
+def test_a_day_writer_with_the_wrong_count_exits_two(message, tmp_path):
+    fake = FakeDayPlanner(texts=("a", "b"), answer=placed())
+    code, _, err = plan(message, tmp_path, planner=fake)
+    assert code == 2
+    assert "unexpected planner output" in err
+    assert not (tmp_path / "draft.yaml").exists()

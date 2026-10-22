@@ -74,10 +74,21 @@ and tested (Phase 3), so the model only has to fill the request.
   quote request from a client message`. Evidence: RED 21 failed (no `planner` keyword, no
   `planner_from_env` in the CLI) then GREEN 824 passed, 21 skipped; ruff clean; the gate end to end:
   `quote build` on a fresh draft exits 1. Parent: readback of the output lines, suite spot check.
-  Not done: the live run, which needs the owner's key and authorization to send a real message.
-- [ ] P5 — Day text: `DayFacts` + `DayWriter` port; a second forced tool `write_day_texts` joins each
-  day's descriptions into a paragraph stored as `itinerary[].text` (still `needs_review: true`); the
-  renderer prints it under `\dayhead`, then the service names; without text the output is unchanged.
+  Review: assess `medium`, 399 lines, not due (`under_budget`). Not done: the live run, which needs
+  the owner's key and authorization to send a real message.
+- [x] P5 — Day text. `DayService`, `DayFacts`, `day_facts(planned, catalog)` (each option's days with a
+  title or placed services, names and descriptions in the request language), `DayWriter` protocol,
+  `with_day_texts` (deep copy; texts land in the right option's `itinerary`; a count mismatch or unknown
+  label → `PlannerUnavailable`; blank texts skipped with a hint; a day without a title gets a "Set a
+  title" hint). The Anthropic adapter adds `write_days` with forced tool `write_day_texts` (`{texts}`)
+  and a prompt that allows only the given facts; no call when there are no days. `ItineraryDay.text`;
+  the reader accepts `itinerary[i].text`; the renderer prints the escaped paragraph under `\dayhead`
+  before the services (golden unchanged). `quote plan` writes the texts into the draft and prints
+  `day texts: N`; a writer failure exits 2 and writes nothing. Route: delegated writer; branch
+  `feat/planner-05-day-text` stacked on P4; commit `feat: write owner-reviewed day text from catalog
+  descriptions`. Evidence: RED only as one collection `ImportError: cannot import name 'DayFacts'`
+  (weak: the other new tests were not run against the old code), then GREEN 860 passed, 21 skipped;
+  ruff clean. Parent: readback of the day prompt, suite spot check.
 
 ## Acceptance criteria
 - A real client message produces a draft that, after owner review, builds a PDF with `quote build`.
@@ -97,4 +108,5 @@ stacked PR per task.
 - P1 started 2026-10-21 on branch `feat/planner-01-request-draft` from `main` (af07b29). Route: delegated writer (reader, CLI and their tests).
 
 ## Next step
-P5: day text. The first live run needs the owner's `ANTHROPIC_API_KEY` and authorization.
+First live run: needs the owner's `ANTHROPIC_API_KEY` in `.env`, `pip install -e ".[llm]"`, and the
+owner's authorization to send a real client message to Anthropic. Then push P1–P5 as stacked PRs.

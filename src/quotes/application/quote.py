@@ -153,16 +153,23 @@ class Quote:
 
 @dataclass(frozen=True)
 class ItineraryDay:
-    """The owner's title for one day of the trip, such as ``Arequipa - Chivay``."""
+    """The owner's title for one day of the trip, such as ``Arequipa - Chivay``.
+
+    ``text`` is an optional paragraph for the day, reviewed by the owner before it is printed.
+    """
 
     day: int
     title: str
+    text: str | None = None
 
     def __post_init__(self) -> None:
         if not _is_int(self.day) or self.day < 1:
             raise InvalidPricingInput("Itinerary day must be an integer of at least 1")
         _require_text("Itinerary title", self.title)
         object.__setattr__(self, "title", self.title.strip())
+        if self.text is not None:
+            _require_text("Itinerary text", self.text)
+            object.__setattr__(self, "text", self.text.strip())
 
 
 @dataclass(frozen=True)

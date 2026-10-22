@@ -308,16 +308,20 @@ def _placed_service(quoted: QuotedLine, texts: _Texts) -> list[str]:
 def _itinerary_section(option: QuotedOption, texts: _Texts) -> list[str]:
     """Every day of the option with the owner's title and the services placed on it.
 
-    Each service shows its name and, when the owner wrote one in the document language, its
-    description. Never the basis or any price of the services table.
+    A day text, when the owner reviewed one, comes first. Each service shows its name and, when
+    the owner wrote one in the document language, its description. Never the basis or any price
+    of the services table.
     """
     titles = {day.day: day.title for day in option.itinerary}
+    day_texts = {day.day: day.text for day in option.itinerary if day.text}
     parts = [f"\\sect{{{texts.itinerary}}}"]
     for day in range(1, option.quote.request.days + 1):
         title = escape_latex(titles.get(day, ""))
         # The header needs room for its first lines, or it would end a page alone.
         parts.append("\\Needspace*{4\\baselineskip}")
         parts.append(f"\\dayhead{{{texts.day_label} {day}}}{{{title}}}")
+        if day in day_texts:
+            parts.append(f"\\noindent {escape_latex(day_texts[day])}\\par")
         for quoted in option.quote.lines:
             if day in quoted.on_days:
                 parts += _placed_service(quoted, texts)

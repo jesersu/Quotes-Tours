@@ -6,6 +6,9 @@ import pytest
 
 from quotes.application.catalog import Catalog, CatalogEntry, LocalPaymentEntry
 from quotes.application.planner import (
+    DayFacts,
+    DayService,
+    DayWriter,
     PlannedDay,
     PlannedExtra,
     PlannedItem,
@@ -16,8 +19,10 @@ from quotes.application.planner import (
     PlannerLocalPayment,
     PlannerUnavailable,
     QuotePlanner,
+    day_facts,
     planner_catalog,
     to_request_data,
+    with_day_texts,
 )
 from quotes.domain.catalog import CatalogItem, PricingUnit
 from quotes.domain.local_payment import LocalPaymentInfo, LocalPrice, VisitorCategory
@@ -259,3 +264,110 @@ def test_a_fake_planner_satisfies_the_port():
 
 def test_planner_unavailable_is_an_exception():
     assert issubclass(PlannerUnavailable, Exception)
+
+
+# --- day texts ---
+
+
+def placed_request(**overrides) -> PlannedRequest:
+    option = PlannedOption(
+        None,
+        None,
+        None,
+        (PlannedItem("van", on_days=(1, 2)), PlannedItem("tour", on_days=(2,))),
+        itinerary=(PlannedDay(1, "Arrival"),),
+    )
+    return request(options=(option,), **overrides)
+
+
+def test_day_facts_join_the_titles_and_the_services_placed_on_each_day():
+    facts = day_facts(placed_request(), VIEW)
+    assert facts == (
+        DayFacts(None, 1, "Arrival", (DayService("Van", "Private transfer"),)),
+        DayFacts(None, 2, None, (DayService("Van", "Private transfer"), DayService("Tour", None))),
+    )
+
+
+def test_day_facts_use_the_language_of_the_request():
+    facts = day_facts(placed_request(language="es"), VIEW)
+    assert facts[0].services == (DayService("Camioneta", "Traslado privado"),)
+
+
+def test_day_facts_skip_days_without_title_or_services_and_unknown_ids():
+    option = PlannedOption(
+        None, None, None, (PlannedItem("nope", on_days=(1,)), PlannedItem("van", on_days=(2,)))
+    )
+    facts = day_facts(request(days=3, options=(option,)), VIEW)
+    assert [f.day for f in facts] == [2]
+
+
+def test_day_facts_are_per_option_and_carry_the_label():
+    first = PlannedOption("A", None, None, (PlannedItem("van", on_days=(1,)),))
+    second = PlannedOption("B", None, 1, (PlannedItem("tour", on_days=(1,)),))
+    facts = day_facts(request(options=(first, second)), VIEW)
+    assert [(f.option_label, f.day) for f in facts] == [("A", 1), ("B", 1)]
+
+
+def test_day_facts_ignore_days_beyond_the_request():
+    option = PlannedOption(None, None, None, (PlannedItem("van", on_days=(5,)),), itinerary=())
+    assert day_facts(request(options=(option,)), VIEW) == ()
+
+
+def test_day_facts_carry_no_price():
+    for value in _walk(day_facts(placed_request(), VIEW)):
+        assert not isinstance(value, Decimal | Money | float)
+    assert SECRET not in repr(day_facts(placed_request(), VIEW))
+
+
+def test_a_class_with_write_days_is_a_day_writer():
+    class Writer:
+        def write_days(self, days, language):
+            return ()
+
+    assert isinstance(Writer(), DayWriter)
+    assert not isinstance(object(), DayWriter)
+
+
+def test_with_day_texts_fills_the_top_level_itinerary_of_a_plain_request():
+    data = to_request_data(placed_request(), VIEW)
+    facts = day_facts(placed_request(), VIEW)
+    result = with_day_texts(data, facts, ("Day one text", "Day two text"))
+    assert result["itinerary"] == [
+        {"day": 1, "title": "Arrival", "text": "Day one text"},
+        {"day": 2, "text": "Day two text"},
+    ]
+    assert "Set a title for day 2" in result["review_hints"]
+    assert data["itinerary"] == [{"day": 1, "title": "Arrival"}]  # the input is not mutated
+
+
+def test_with_day_texts_fills_each_option():
+    first = PlannedOption("A", None, None, (PlannedItem("van", on_days=(1,)),))
+    second = PlannedOption(
+        "B", None, None, (PlannedItem("tour", on_days=(1,)),), itinerary=(PlannedDay(1, "Walk"),)
+    )
+    planned = request(options=(first, second))
+    facts = day_facts(planned, VIEW)
+    result = with_day_texts(to_request_data(planned, VIEW), facts, ("For A", "For B"))
+    a, b = result["options"]
+    assert a["itinerary"] == [{"day": 1, "text": "For A"}]
+    assert b["itinerary"] == [{"day": 1, "title": "Walk", "text": "For B"}]
+
+
+def test_with_day_texts_rejects_a_length_mismatch():
+    facts = day_facts(placed_request(), VIEW)
+    with pytest.raises(PlannerUnavailable, match="^unexpected planner output$"):
+        with_day_texts(to_request_data(placed_request(), VIEW), facts, ("only one",))
+
+
+def test_with_day_texts_skips_blank_texts_with_a_hint():
+    facts = day_facts(placed_request(), VIEW)
+    result = with_day_texts(to_request_data(placed_request(), VIEW), facts, ("  ", "Real"))
+    assert result["itinerary"] == [{"day": 1, "title": "Arrival"}, {"day": 2, "text": "Real"}]
+    assert "No text for day 1" in result["review_hints"]
+
+
+def test_a_draft_with_day_texts_parses_once_reviewed():
+    data = to_request_data(placed_request(), VIEW)
+    data["itinerary"] = [{"day": 2, "title": "Back"}]
+    data = with_day_texts(data, day_facts(placed_request(), VIEW), ("One", "Two"))
+    assert {"day": 2, "title": "Back", "text": "Two"} in data["itinerary"]

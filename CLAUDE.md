@@ -82,6 +82,10 @@ repository; update the vendored copy to match.
   data to it. Tests never call the API: they use a fake client, and the `llm` marker (live test)
   runs only with `ANTHROPIC_API_KEY` set and never in CI.
 
+Day texts: `quotes quote plan` also asks the planner for one paragraph per day, built only from
+the owner's catalog descriptions and day titles; they are written into the draft's `itinerary`
+(`text`) for the owner to review and are printed before the day's services.
+
 ## Architecture
 
 Light hexagonal layout under `src/quotes/`. Dependencies point inward:
